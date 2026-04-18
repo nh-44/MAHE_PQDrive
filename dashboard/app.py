@@ -213,7 +213,7 @@ def create_app() -> Flask:
 	# Store unified ECU policy (single source of truth)
 	app.config["ecu_policy"] = {
 		"adas_ecu": {"max_speed": 0, "min_battery": 20, "charging_ok": True},
-		"powertrain_ecu": {"max_speed": 0, "min_battery": 20, "charging_ok": False},
+		"powertrain_ecu": {"max_speed": 0, "min_battery": 20, "charging_ok": True},
 		"braking_ecu": {"max_speed": 0, "min_battery": 25, "charging_ok": True},
 		"steering_ecu": {"max_speed": 5, "min_battery": 15, "charging_ok": True},
 		"maps_ecu": {"max_speed": 150, "min_battery": 5, "charging_ok": True},
@@ -301,12 +301,15 @@ def create_app() -> Flask:
 		"""Run OTA with payload parsing, scenario classification, and pipeline verification."""
 		data = request.get_json() or {}
 		payload = data.get("payload", "").strip()
+		scenario_hint = data.get("scenario_hint", "auto")
 		vehicle_state_overrides = data.get("vehicle_state", {})
 		
 		if not payload:
 			return jsonify({"error": "No firmware payload provided"}), 400
 
 		classification = classify_payload(payload)
+		if scenario_hint and scenario_hint != "auto":
+			classification["scenario_hint"] = scenario_hint
 		parsed = classification.get("parsed", {})
 		firmware_version = parsed.get("sw")
 		firmware_ecu_id = parsed.get("ecu_id")
@@ -387,6 +390,21 @@ def create_app() -> Flask:
 				)
 				update_package["signature"] = pq_dilithium.sign(attacker_private_key, payload_bytes).hex()
 				update_package["source"] = delivery_context.get("source", "charging_network")
+			elif scenario_hint in {"tamper", "payload_tamper", "tamper_signature"}:
+				from core import sha3_hash as pq_sha3
+
+				update_package = app.ota_server.prepare_update(
+					payload=payload_bytes,
+					current_version=baseline_current,
+					new_version=firmware_version or "1.0.0",
+					target_ecu=target_ecu,
+				)
+				tampered_sig = bytearray.fromhex(update_package["signature"])
+				tampered_sig[0] ^= 0xFF
+				update_package["signature"] = tampered_sig.hex()
+				tampered_hash = pq_sha3.hash_package(payload_bytes + b"__tampered__")
+				update_package["package_hash"] = tampered_hash
+				update_package["source"] = delivery_context.get("source", "legitimate_ota_server")
 			else:
 				update_package = app.ota_server.prepare_update(
 					payload=payload_bytes,

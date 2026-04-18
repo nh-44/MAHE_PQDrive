@@ -88,3 +88,20 @@ def test_delivery_gate_allows_rogue_charger_when_charging() -> None:
 
 	assert gate["ok"] is True
 	assert gate["source_matches_state"] is True
+
+
+def test_delivery_gate_allows_powertrain_charging_updates() -> None:
+	payload = (
+		"ECU_ID:PWRT-5.1 | HW:REV-B | SW:9.9.9 | BUILD:20240318-b8e3d7 | "
+		"REGION:EU | MODULES:TORQUE_CTL_v6,REGEN_BRAKE_v4,THERMAL_MGMT_v3 | "
+		"PATCHES:CVE-2024-5501 | TS:2024-03-18T09:16:04Z"
+	)
+	classification = classify_payload(payload)
+	gate = evaluate_delivery_gate(
+		{"speed_kph": 0, "battery_soc": 68, "charging_active": True, "data_link_locked": True},
+		classification,
+		{"powertrain_ecu": {"max_speed": 0, "min_battery": 20, "charging_ok": True}},
+	)
+
+	assert gate["ok"] is True
+	assert gate["target_ecu"] == "powertrain_ecu"

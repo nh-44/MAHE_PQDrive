@@ -289,6 +289,15 @@
       <label>Firmware Payload (Pipe-delimited)</label>
       <textarea id="inp-payload" rows="4" placeholder="Enter firmware payload..."></textarea>
     </div>
+    <div class="field">
+      <label>Threat Mode</label>
+      <select id="scenario-hint">
+        <option value="auto" selected>Auto classify</option>
+        <option value="rogue_charger">Rogue charger</option>
+        <option value="rollback">Rollback</option>
+        <option value="tamper">Payload tamper</option>
+      </select>
+    </div>
     <div id="classification-panel" style="display:none;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:7px;margin-bottom:6px">
       <div style="font-size:8px;color:#8b949e;text-transform:uppercase;letter-spacing:.05em">Detected Scenario</div>
       <div id="cls-title" style="font-size:11px;font-weight:700;color:#58a6ff;margin-top:3px">—</div>
@@ -546,7 +555,12 @@ async function runOTAUpdate() {
     const response = await fetch('/api/run-json-scenario', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scenario_name: "OTA Update", payload: payload, vehicle_state: vehicleState })
+      body: JSON.stringify({
+        scenario_name: "OTA Update",
+        payload: payload,
+        scenario_hint: document.getElementById('scenario-hint').value,
+        vehicle_state: vehicleState
+      })
     });
     const result = await response.json();
     renderClassification(result.classification);

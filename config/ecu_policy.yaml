@@ -24,6 +24,8 @@ ecus:
     domain: safety_critical
     auto_deploy: false
     requires_dual_auth: true
+    allow_updates_while_charging: true
+    charging_ok: true
 
 charging_policy:
   require_authenticated_charger: true
