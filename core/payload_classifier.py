@@ -36,6 +36,11 @@ ROGUE_SOURCE = "charging_network"
 WIRELESS_CHANNEL = "wireless_telematics"
 CHARGER_CHANNEL = "charger_interface"
 
+THREAT_LEGITIMATE = "LEGITIMATE"
+THREAT_ROGUE_VERSION = "ROGUE_VERSION"
+THREAT_ROLLBACK = "ROLLBACK"
+THREAT_PAYLOAD_TAMPER = "PAYLOAD_TAMPER"
+
 
 ECU_PROFILES: dict[str, ECUProfile] = {
 	"ADAS-3.2": ECUProfile(
@@ -162,6 +167,7 @@ def classify_payload(payload_text: str) -> dict[str, Any]:
 		return {
 			"parsed": parsed,
 			"scenario": "invalid_payload",
+			"threat_classification": THREAT_LEGITIMATE,
 			"confidence": "high",
 			"risk": "UNKNOWN",
 			"reasoning": [parsed.get("error", "invalid payload")],
@@ -178,6 +184,7 @@ def classify_payload(payload_text: str) -> dict[str, Any]:
 		return {
 			"parsed": parsed,
 			"scenario": "unknown_ecu",
+			"threat_classification": THREAT_ROGUE_VERSION,
 			"confidence": "medium",
 			"risk": "HIGH",
 			"reasoning": [
@@ -281,6 +288,13 @@ def classify_payload(payload_text: str) -> dict[str, Any]:
 
 	return {
 		"parsed": parsed,
+		"threat_classification": {
+			"legitimate_ota": THREAT_LEGITIMATE,
+			"rogue_charger": THREAT_ROGUE_VERSION,
+			"rollback_attack": THREAT_ROLLBACK,
+			"legitimate_or_metadata_clone": THREAT_LEGITIMATE,
+			"version_anomaly": THREAT_ROGUE_VERSION,
+		}.get(scenario, THREAT_LEGITIMATE),
 		"profile": {
 			"ecu_id": profile.ecu_id,
 			"legit_sw": profile.legit_sw,

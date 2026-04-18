@@ -515,9 +515,10 @@ function renderClassification(classification) {
   const iocs = classification.iocs || [];
   const notes = classification.reasoning || [];
   const delivery = classification.delivery_context || {};
+  const threatClassification = (classification.threat_classification || 'UNKNOWN').toUpperCase();
 
   title.textContent = scenario;
-  meta.textContent = `Risk: ${risk} | Confidence: ${confidence} | Source: ${delivery.source || 'n/a'} | Channel: ${delivery.delivery_channel || 'n/a'}`;
+  meta.textContent = `Threat: ${threatClassification} | Risk: ${risk} | Confidence: ${confidence} | Source: ${delivery.source || 'n/a'} | Channel: ${delivery.delivery_channel || 'n/a'}`;
   reasoning.innerHTML = [
     notes.length ? `Reasoning: ${notes.join(' | ')}` : 'Reasoning: n/a',
     iocs.length ? `IoCs: ${iocs.join(', ')}` : 'IoCs: none',

@@ -105,3 +105,26 @@ def test_delivery_gate_allows_powertrain_charging_updates() -> None:
 
 	assert gate["ok"] is True
 	assert gate["target_ecu"] == "powertrain_ecu"
+
+
+def test_payload_tamper_forces_content_verification_failure() -> None:
+	from dashboard.app import app
+
+	payload = (
+		"ECU_ID:BODY-2.0 | HW:REV-A | SW:2.0.0 | BUILD:20240318-c1f9a2 | "
+		"REGION:EU | MODULES:DOOR_LOCK_v3,WINDOW_CTL_v2,LIGHT_MGR_v4,SENSOR_FUSION_v2 | "
+		"TS:2024-03-18T09:18:11Z"
+	)
+	client = app.test_client()
+	result = client.post(
+		"/api/run-json-scenario",
+		json={
+			"payload": payload,
+			"scenario_hint": "tamper",
+			"vehicle_state": {"speed_kph": 0, "battery_soc": 68, "temperature_c": 31, "charging_active": False, "data_link_locked": True},
+		},
+	).get_json()
+
+	assert result["classification"]["threat_classification"] == "PAYLOAD_TAMPER"
+	assert result["failed_at"] in {"dilithium", "hash"}
+	assert result["delivery_gate"]["ok"] is True

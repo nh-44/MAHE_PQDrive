@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from core.pipeline import OTAVerificationPipeline
+from core import sha3_hash
 from vehicle.charger_security import ChargerSecurityManager
 from vehicle.ecu_domain import ECUDomainManager
 
@@ -61,6 +62,7 @@ class VehicleGateway:
 	def receive_update_request(self, request: dict) -> dict:
 		"""Validate OTA source and run cryptographic verification pipeline."""
 		from datetime import datetime, timezone
+		scenario_hint = request.get("scenario_hint", "auto")
 		
 		request_id = request.get("request_id")
 		
@@ -194,6 +196,34 @@ class VehicleGateway:
 					"failed_at": "ecu_validation",
 					"reason": f"Invalid ECU target: {firmware_ecu} not in allowed set",
 				}
+
+		if scenario_hint in {"tamper", "payload_tamper", "tamper_signature"}:
+			original_payload_bytes = bytes.fromhex(request["payload"])
+			tampered_payload_bytes = original_payload_bytes + b"__tampered_body__"
+			expected_payload_hash = sha3_hash.hash_package(original_payload_bytes)
+			computed_payload_hash = sha3_hash.hash_package(tampered_payload_bytes)
+			request["expected_payload_hash"] = expected_payload_hash
+			request["payload"] = tampered_payload_bytes.hex()
+			request["scenario_hint"] = "payload_tamper"
+			request["threat_classification"] = "PAYLOAD_TAMPER"
+			request["computed_payload_hash"] = computed_payload_hash
+
+			self.request_log.append(
+				{
+					"timestamp": datetime.now(timezone.utc).isoformat(),
+					"source": request.get("source"),
+					"request": request,
+					"event": "PAYLOAD_TAMPER",
+					"details": {
+						"ECU_ID": firmware_ecu,
+						"BUILD": request.get("build"),
+						"computed_payload_hash": computed_payload_hash,
+						"expected_payload_hash": expected_payload_hash,
+						"timestamp": datetime.now(timezone.utc).isoformat(),
+						"vehicle_state": vehicle_state,
+					},
+				}
+			)
 
 		result = self.pipeline.run(request)
 		result["accepted"] = result["all_passed"]

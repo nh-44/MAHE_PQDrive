@@ -310,6 +310,12 @@ def create_app() -> Flask:
 		classification = classify_payload(payload)
 		if scenario_hint and scenario_hint != "auto":
 			classification["scenario_hint"] = scenario_hint
+			if scenario_hint in {"tamper", "payload_tamper", "tamper_signature"}:
+				classification["threat_classification"] = "PAYLOAD_TAMPER"
+			elif scenario_hint == "rogue_charger":
+				classification["threat_classification"] = "ROGUE_VERSION"
+			elif scenario_hint == "rollback":
+				classification["threat_classification"] = "ROLLBACK"
 		parsed = classification.get("parsed", {})
 		firmware_version = parsed.get("sw")
 		firmware_ecu_id = parsed.get("ecu_id")
@@ -404,6 +410,7 @@ def create_app() -> Flask:
 				update_package["signature"] = tampered_sig.hex()
 				tampered_hash = pq_sha3.hash_package(payload_bytes + b"__tampered__")
 				update_package["package_hash"] = tampered_hash
+				update_package["expected_payload_hash"] = pq_sha3.hash_package(payload_bytes)
 				update_package["source"] = delivery_context.get("source", "legitimate_ota_server")
 			else:
 				update_package = app.ota_server.prepare_update(
@@ -416,6 +423,7 @@ def create_app() -> Flask:
 
 			update_package["delivery_channel"] = delivery_context.get("delivery_channel")
 			update_package["vehicle_state"] = vehicle_state_overrides
+			update_package["scenario_hint"] = scenario_hint
 
 			pipeline_result = app.verification_pipeline.run(update_package)
 			result_obj.update({
@@ -425,6 +433,25 @@ def create_app() -> Flask:
 				"hash_ok": pipeline_result.get("hash_ok", False),
 				"version_ok": pipeline_result.get("version_ok", False),
 			})
+
+			if classification.get("threat_classification") == "PAYLOAD_TAMPER":
+				trace = pipeline_result.get("verification_trace", [])
+				computed_hash = None
+				expected_hash = update_package.get("expected_payload_hash")
+				for entry in trace:
+					if entry.get("stage") == "hash":
+						computed_hash = entry.get("computed_payload_hash")
+						expected_hash = entry.get("expected_payload_hash", expected_hash)
+						break
+				app.recovery_manager.log_event("PAYLOAD_TAMPER", {
+					"ECU_ID": firmware_ecu_id,
+					"BUILD": parsed.get("build"),
+					"computed_payload_hash": computed_hash,
+					"expected_payload_hash": expected_hash,
+					"timestamp": parsed.get("timestamp"),
+					"vehicle_state": vehicle_state_overrides,
+					"failed_at": pipeline_result.get("failed_at"),
+				})
 
 			ecu_validation_ok = bool(target_ecu and app.vehicle_gateway.ecu_manager.is_valid_ecu_target(target_ecu))
 			if ecu_validation_ok:

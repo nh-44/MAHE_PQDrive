@@ -125,12 +125,19 @@ class OTAVerificationPipeline:
 			return result
 
 		stage_started = perf_counter()
+		expected_hash = update_package.get("expected_payload_hash", update_package.get("package_hash"))
 		result["hash_ok"] = sha3_hash.verify_hash(
 			payload_bytes,
-			update_package["package_hash"],
+			expected_hash,
 		)
 		result["stage_durations_ms"]["hash"] = round((perf_counter() - stage_started) * 1000, 3)
-		result["verification_trace"].append({"stage": "hash", "ok": result["hash_ok"], "duration_ms": result["stage_durations_ms"]["hash"]})
+		result["verification_trace"].append({
+			"stage": "hash",
+			"ok": result["hash_ok"],
+			"duration_ms": result["stage_durations_ms"]["hash"],
+			"expected_payload_hash": expected_hash,
+			"computed_payload_hash": sha3_hash.hash_package(payload_bytes),
+		})
 		if not result["hash_ok"]:
 			result["failed_at"] = "hash"
 			return result
