@@ -52,6 +52,7 @@ def test_classify_marks_chassis_clone_as_medium_confidence() -> None:
 
 	assert classification["scenario"] == "legitimate_or_metadata_clone"
 	assert classification["confidence"] == "medium"
+	assert classification["threat_classification"] == "PAYLOAD_TAMPER"
 	assert "stealth_clone_possible" in classification["iocs"]
 
 

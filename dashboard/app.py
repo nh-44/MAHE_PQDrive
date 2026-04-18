@@ -316,6 +316,8 @@ def create_app() -> Flask:
 				classification["threat_classification"] = "ROGUE_VERSION"
 			elif scenario_hint == "rollback":
 				classification["threat_classification"] = "ROLLBACK"
+		elif classification.get("threat_classification") == "PAYLOAD_TAMPER":
+			classification["scenario_hint"] = "payload_tamper"
 		parsed = classification.get("parsed", {})
 		firmware_version = parsed.get("sw")
 		firmware_ecu_id = parsed.get("ecu_id")
@@ -396,7 +398,7 @@ def create_app() -> Flask:
 				)
 				update_package["signature"] = pq_dilithium.sign(attacker_private_key, payload_bytes).hex()
 				update_package["source"] = delivery_context.get("source", "charging_network")
-			elif scenario_hint in {"tamper", "payload_tamper", "tamper_signature"}:
+			elif scenario_hint in {"tamper", "payload_tamper", "tamper_signature"} or classification.get("threat_classification") == "PAYLOAD_TAMPER":
 				from core import sha3_hash as pq_sha3
 
 				update_package = app.ota_server.prepare_update(

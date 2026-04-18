@@ -292,7 +292,7 @@ def classify_payload(payload_text: str) -> dict[str, Any]:
 			"legitimate_ota": THREAT_LEGITIMATE,
 			"rogue_charger": THREAT_ROGUE_VERSION,
 			"rollback_attack": THREAT_ROLLBACK,
-			"legitimate_or_metadata_clone": THREAT_LEGITIMATE,
+			"legitimate_or_metadata_clone": THREAT_PAYLOAD_TAMPER if ecu_id == "CHAS-4.0" else THREAT_LEGITIMATE,
 			"version_anomaly": THREAT_ROGUE_VERSION,
 		}.get(scenario, THREAT_LEGITIMATE),
 		"profile": {

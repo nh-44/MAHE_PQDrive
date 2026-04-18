@@ -197,7 +197,7 @@ class VehicleGateway:
 					"reason": f"Invalid ECU target: {firmware_ecu} not in allowed set",
 				}
 
-		if scenario_hint in {"tamper", "payload_tamper", "tamper_signature"}:
+		if scenario_hint in {"tamper", "payload_tamper", "tamper_signature"} or request.get("threat_classification") == "PAYLOAD_TAMPER":
 			original_payload_bytes = bytes.fromhex(request["payload"])
 			tampered_payload_bytes = original_payload_bytes + b"__tampered_body__"
 			expected_payload_hash = sha3_hash.hash_package(original_payload_bytes)
