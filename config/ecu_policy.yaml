@@ -1,0 +1,26 @@
+ecus:
+	maps_ecu:
+		domain: infotainment
+		auto_deploy: true
+	audio_ecu:
+		domain: infotainment
+		auto_deploy: true
+	bluetooth_ecu:
+		domain: infotainment
+		auto_deploy: true
+	braking_ecu:
+		domain: safety_critical
+		auto_deploy: false
+		requires_dual_auth: true
+	steering_ecu:
+		domain: safety_critical
+		auto_deploy: false
+		requires_dual_auth: true
+	adas_ecu:
+		domain: safety_critical
+		auto_deploy: false
+		requires_dual_auth: true
+	powertrain_ecu:
+		domain: safety_critical
+		auto_deploy: false
+		requires_dual_auth: true
