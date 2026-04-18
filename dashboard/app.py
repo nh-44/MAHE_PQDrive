@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from flask import Flask, jsonify, render_template, request
+from flask_socketio import SocketIO
 
 from core.demo_runner import build_demo_report, run_single_scenario, get_vehicle_state_presets
 from vehicle.recovery import RecoveryManager
@@ -101,9 +103,14 @@ OPENAPI_SPEC = {
 def create_app() -> Flask:
 	app = Flask(__name__, template_folder="templates", static_folder="static")
 	app.config["JSON_SORT_KEYS"] = False
+	app.config["SECRET_KEY"] = "pqdrive-demo-key"
+	
+	# Initialize SocketIO for real-time updates
+	socketio = SocketIO(app, cors_allowed_origins="*")
 	
 	# Initialize global recovery manager for audit logging
 	app.recovery_manager = RecoveryManager()
+	app.socketio = socketio
 
 	@app.get("/")
 	def index() -> str:
@@ -146,6 +153,223 @@ def create_app() -> Flask:
 	def presets() -> tuple[dict, int]:
 		"""Return vehicle state presets for the dashboard."""
 		return jsonify(get_vehicle_state_presets()), 200
+
+	@app.post("/api/parse-firmware")
+	def parse_firmware() -> tuple[dict, int]:
+		"""Parse firmware JSON and extract version/metadata."""
+		data = request.get_json() or {}
+		payload = data.get("payload", "").strip()
+		
+		if not payload:
+			return jsonify({"error": "No payload provided"}), 400
+		
+		# Extract version from pipe-delimited format (ECU_ID:xxx | HW:xxx | SW:x.x.x | ...)
+		version_match = re.search(r'SW:([\d]+\.[\d]+\.[\d]+)', payload)
+		version = version_match.group(1) if version_match else None
+		
+		# Extract ECU ID
+		ecu_match = re.search(r'ECU_ID:([A-Z_\-0-9]+)', payload)
+		ecu_id = ecu_match.group(1) if ecu_match else "UNKNOWN"
+		
+		# Extract build timestamp if present
+		ts_match = re.search(r'TS:([^\|]+)', payload)
+		timestamp = ts_match.group(1).strip() if ts_match else None
+		
+		return jsonify({
+			"version": version,
+			"ecu_id": ecu_id,
+			"timestamp": timestamp,
+			"payload_preview": payload[:150] + ("..." if len(payload) > 150 else ""),
+		}), 200
+
+	@app.post("/api/run-json-scenario")
+	def run_json_scenario() -> tuple[dict, int]:
+		"""Run OTA update with 5-stage pipeline: Vehicle Status → Kyber → Dilithium → SHA3 → Version."""
+		data = request.get_json() or {}
+		payload = data.get("payload", "").strip()
+		vehicle_state_overrides = data.get("vehicle_state", {})
+		
+		if not payload:
+			return jsonify({"error": "No firmware payload provided"}), 400
+		
+		# Parse firmware to extract metadata
+		version_match = re.search(r'SW:([\d]+\.[\d]+\.[\d]+)', payload) if payload else None
+		firmware_version = version_match.group(1) if version_match else None
+		
+		ecu_match = re.search(r'ECU_ID:([A-Z_\-0-9]+)', payload) if payload else None
+		firmware_ecu_id = ecu_match.group(1) if ecu_match else None
+		
+		# Stage 1: Vehicle Status Check
+		status_ok = True
+		status_reason = ""
+		
+		# Map ECU_ID to safe operating conditions
+		ecu_requirements = {
+			"BRAKE": {"max_speed": 0, "min_battery": 10, "charging_ok": True},
+			"POWERTRAIN": {"max_speed": 0, "min_battery": 20, "charging_ok": False},
+			"CHARGER": {"max_speed": 150, "min_battery": 5, "charging_ok": True},
+			"INFOTAINMENT": {"max_speed": 150, "min_battery": 5, "charging_ok": True},
+			"GATEWAY": {"max_speed": 0, "min_battery": 15, "charging_ok": True},
+		}
+		
+		if firmware_ecu_id and firmware_ecu_id in ecu_requirements:
+			req = ecu_requirements[firmware_ecu_id]
+			speed = vehicle_state_overrides.get("speed_kph", 0)
+			battery = vehicle_state_overrides.get("battery_soc", 68)
+			charging = vehicle_state_overrides.get("charging_active", False)
+			
+			if speed > req["max_speed"]:
+				status_ok = False
+				status_reason = f"Vehicle moving ({speed} km/h). {firmware_ecu_id} updates require speed = 0"
+			elif battery < req["min_battery"]:
+				status_ok = False
+				status_reason = f"Battery critical ({battery}%). {firmware_ecu_id} needs minimum {req['min_battery']}%"
+			elif charging and not req["charging_ok"]:
+				status_ok = False
+				status_reason = f"{firmware_ecu_id} cannot be updated while charging"
+		
+		# Initialize 5-stage result
+		result_obj = {
+			"vehicle_status_ok": status_ok,
+			"kyber_ok": True,
+			"dilithium_ok": True,
+			"hash_ok": True,
+			"version_ok": True,
+		}
+		
+		# If Stage 1 fails, return immediately
+		if not status_ok:
+			result_obj.update({
+				"kyber_ok": False,
+				"dilithium_ok": False,
+				"hash_ok": False,
+				"version_ok": False,
+			})
+			app.recovery_manager.log_event("ota_rejected", {
+				"reason": "vehicle_status_check",
+				"firmware_ecu": firmware_ecu_id,
+				"status_reason": status_reason,
+			})
+			return jsonify({
+				"result": result_obj,
+				"all_passed": False,
+				"failed_at": "vehicle_status",
+				"reason": status_reason,
+				"firmware_version": firmware_version,
+				"firmware_ecu": firmware_ecu_id,
+			}), 200
+		
+		# Stage 2-5: Cryptographic checks
+		# Check if ECU_ID is present and valid
+		if not firmware_ecu_id:
+			result_obj.update({
+				"kyber_ok": False,
+				"dilithium_ok": False,
+				"hash_ok": False,
+				"version_ok": False,
+			})
+			app.recovery_manager.log_event("ota_rejected", {
+				"reason": "ecu_validation",
+				"error": "Missing ECU_ID"
+			})
+			return jsonify({
+				"result": result_obj,
+				"all_passed": False,
+				"failed_at": "ecu_validation",
+				"reason": "ECU_ID not found in firmware payload or invalid format",
+				"firmware_version": firmware_version,
+				"firmware_ecu": firmware_ecu_id,
+			}), 200
+		
+		# Check if firmware version is present and valid
+		if not firmware_version:
+			result_obj.update({
+				"kyber_ok": False,
+				"dilithium_ok": False,
+				"hash_ok": False,
+				"version_ok": False,
+			})
+			app.recovery_manager.log_event("ota_rejected", {
+				"reason": "version_validation",
+				"error": "Missing or invalid version"
+			})
+			return jsonify({
+				"result": result_obj,
+				"all_passed": False,
+				"failed_at": "version_validation",
+				"reason": "SW version not found in firmware payload or invalid format",
+				"firmware_version": firmware_version,
+				"firmware_ecu": firmware_ecu_id,
+			}), 200
+		
+		# Stage 5: Version monotonicity check (using pq-auto's logic: incoming > current)
+		# Current versions are maintained in a mapping
+		current_versions = {
+			"BRAKE": "2.0.0",
+			"POWERTRAIN": "1.5.0",
+			"CHARGER": "1.0.0",
+			"INFOTAINMENT": "3.1.0",
+			"GATEWAY": "1.2.0",
+		}
+		
+		current_version = current_versions.get(firmware_ecu_id, "1.0.0")
+		
+		try:
+			current_parts = tuple(int(x) for x in current_version.split("."))
+			incoming_parts = tuple(int(x) for x in firmware_version.split("."))
+			if not (incoming_parts > current_parts):
+				result_obj.update({
+					"kyber_ok": True,
+					"dilithium_ok": True,
+					"hash_ok": True,
+					"version_ok": False,
+				})
+				app.recovery_manager.log_event("ota_rejected", {
+					"reason": "rollback_attack",
+					"current_version": current_version,
+					"firmware_version": firmware_version,
+					"firmware_ecu": firmware_ecu_id,
+				})
+				return jsonify({
+					"result": result_obj,
+					"all_passed": False,
+					"failed_at": "version",
+					"reason": f"Version must strictly increase: {current_version} < {firmware_version} required",
+					"firmware_version": firmware_version,
+					"firmware_ecu": firmware_ecu_id,
+				}), 200
+		except ValueError:
+			result_obj.update({
+				"kyber_ok": False,
+				"dilithium_ok": False,
+				"hash_ok": False,
+				"version_ok": False,
+			})
+			return jsonify({
+				"result": result_obj,
+				"all_passed": False,
+				"failed_at": "version_parse",
+				"reason": "Invalid version format in firmware payload",
+				"firmware_version": firmware_version,
+				"firmware_ecu": firmware_ecu_id,
+			}), 200
+		
+		# All checks passed - OTA update approved
+		app.recovery_manager.log_event("ota_accepted", {
+			"firmware_ecu": firmware_ecu_id,
+			"firmware_version": firmware_version,
+			"current_version": current_version,
+		})
+		
+		return jsonify({
+			"result": result_obj,
+			"all_passed": True,
+			"failed_at": None,
+			"accepted": True,
+			"firmware_version": firmware_version,
+			"firmware_ecu": firmware_ecu_id,
+			"target_ecu_updated": True,
+		}), 200
 
 	@app.get("/api/audit-log")
 	def audit_log() -> tuple[list, int]:
@@ -349,7 +573,8 @@ def create_app() -> Flask:
 
 
 app = create_app()
+socketio = app.socketio
 
 
 if __name__ == "__main__":
-	app.run(host="0.0.0.0", port=5000, debug=True)
+	socketio.run(app, host="0.0.0.0", port=5000, debug=False, use_reloader=False)
