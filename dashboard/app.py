@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 from functools import wraps
@@ -10,6 +9,7 @@ from flask import Flask, jsonify, render_template, request
 from flask_socketio import SocketIO
 
 from core.demo_runner import build_demo_report, run_single_scenario, get_vehicle_state_presets
+from core.payload_classifier import classify_payload, parse_firmware_payload
 from vehicle.recovery import RecoveryManager
 
 
@@ -212,11 +212,11 @@ def create_app() -> Flask:
 	
 	# Store unified ECU policy (single source of truth)
 	app.config["ecu_policy"] = {
-		"BRAKE": {"max_speed": 0, "min_battery": 10, "charging_ok": True},
-		"POWERTRAIN": {"max_speed": 0, "min_battery": 20, "charging_ok": False},
-		"CHARGER": {"max_speed": 150, "min_battery": 5, "charging_ok": True},
-		"INFOTAINMENT": {"max_speed": 150, "min_battery": 5, "charging_ok": True},
-		"GATEWAY": {"max_speed": 0, "min_battery": 15, "charging_ok": True},
+		"adas_ecu": {"max_speed": 0, "min_battery": 20, "charging_ok": True},
+		"powertrain_ecu": {"max_speed": 0, "min_battery": 20, "charging_ok": False},
+		"braking_ecu": {"max_speed": 0, "min_battery": 25, "charging_ok": True},
+		"steering_ecu": {"max_speed": 5, "min_battery": 15, "charging_ok": True},
+		"maps_ecu": {"max_speed": 150, "min_battery": 5, "charging_ok": True},
 	}
 
 	@app.get("/")
@@ -278,42 +278,55 @@ def create_app() -> Flask:
 		
 		if not payload:
 			return jsonify({"error": "No payload provided"}), 400
-		
-		# Extract version from pipe-delimited format (ECU_ID:xxx | HW:xxx | SW:x.x.x | ...)
-		version_match = re.search(r'SW:([\d]+\.[\d]+\.[\d]+)', payload)
-		version = version_match.group(1) if version_match else None
-		
-		# Extract ECU ID
-		ecu_match = re.search(r'ECU_ID:([A-Z_\-0-9]+)', payload)
-		ecu_id = ecu_match.group(1) if ecu_match else "UNKNOWN"
-		
-		# Extract build timestamp if present
-		ts_match = re.search(r'TS:([^\|]+)', payload)
-		timestamp = ts_match.group(1).strip() if ts_match else None
-		
-		return jsonify({
-			"version": version,
-			"ecu_id": ecu_id,
-			"timestamp": timestamp,
-			"payload_preview": payload[:150] + ("..." if len(payload) > 150 else ""),
-		}), 200
+
+		parsed = parse_firmware_payload(payload)
+		if not parsed.get("valid"):
+			return jsonify(parsed), 400
+
+		return jsonify(
+			{
+				"ecu_id": parsed.get("ecu_id"),
+				"hw": parsed.get("hw"),
+				"version": parsed.get("sw"),
+				"build": parsed.get("build"),
+				"timestamp": parsed.get("timestamp"),
+				"modules": parsed.get("modules", []),
+				"patches": parsed.get("patches", []),
+				"payload_preview": payload[:150] + ("..." if len(payload) > 150 else ""),
+			}
+		), 200
 
 	@app.post("/api/run-json-scenario")
 	def run_json_scenario() -> tuple[dict, int]:
-		"""Run OTA update with 5-stage pipeline: Vehicle Status → Kyber → Dilithium → SHA3 → Version."""
+		"""Run OTA with payload parsing, scenario classification, and pipeline verification."""
 		data = request.get_json() or {}
 		payload = data.get("payload", "").strip()
 		vehicle_state_overrides = data.get("vehicle_state", {})
 		
 		if not payload:
 			return jsonify({"error": "No firmware payload provided"}), 400
-		
-		# Parse firmware to extract metadata
-		version_match = re.search(r'SW:([\d]+\.[\d]+\.[\d]+)', payload) if payload else None
-		firmware_version = version_match.group(1) if version_match else None
-		
-		ecu_match = re.search(r'ECU_ID:([A-Z_\-0-9]+)', payload) if payload else None
-		firmware_ecu_id = ecu_match.group(1) if ecu_match else None
+
+		classification = classify_payload(payload)
+		parsed = classification.get("parsed", {})
+		firmware_version = parsed.get("sw")
+		firmware_ecu_id = parsed.get("ecu_id")
+		target_ecu = classification.get("target_ecu", "maps_ecu")
+
+		if classification.get("scenario") == "invalid_payload":
+			return jsonify({
+				"result": {
+					"vehicle_status_ok": False,
+					"kyber_ok": False,
+					"dilithium_ok": False,
+					"hash_ok": False,
+					"version_ok": False,
+				},
+				"all_passed": False,
+				"accepted": False,
+				"failed_at": "payload_parse",
+				"reason": parsed.get("error", "Invalid payload format"),
+				"classification": classification,
+			}), 400
 		
 		# Stage 1: Vehicle Status Check
 		status_ok = True
@@ -322,21 +335,21 @@ def create_app() -> Flask:
 		# Use unified policy from app config (single source of truth)
 		policy = app.config.get("ecu_policy", {})
 		
-		if firmware_ecu_id and firmware_ecu_id in policy:
-			req = policy[firmware_ecu_id]
+		if target_ecu in policy:
+			req = policy[target_ecu]
 			speed = vehicle_state_overrides.get("speed_kph", 0)
 			battery = vehicle_state_overrides.get("battery_soc", 68)
 			charging = vehicle_state_overrides.get("charging_active", False)
 			
 			if speed > req["max_speed"]:
 				status_ok = False
-				status_reason = f"Vehicle moving ({speed} km/h). {firmware_ecu_id} updates require speed = 0"
+				status_reason = f"Vehicle moving ({speed} km/h). {target_ecu} updates require speed <= {req['max_speed']}"
 			elif battery < req["min_battery"]:
 				status_ok = False
-				status_reason = f"Battery critical ({battery}%). {firmware_ecu_id} needs minimum {req['min_battery']}%"
+				status_reason = f"Battery critical ({battery}%). {target_ecu} needs minimum {req['min_battery']}%"
 			elif charging and not req["charging_ok"]:
 				status_ok = False
-				status_reason = f"{firmware_ecu_id} cannot be updated while charging"
+				status_reason = f"{target_ecu} cannot be updated while charging"
 		
 		# Initialize 5-stage result (SECURITY FIX: Default to False, not True)
 		result_obj = {
@@ -363,25 +376,60 @@ def create_app() -> Flask:
 			return jsonify({
 				"result": result_obj,
 				"all_passed": False,
+				"accepted": False,
 				"failed_at": "vehicle_status",
 				"reason": status_reason,
 				"firmware_version": firmware_version,
 				"firmware_ecu": firmware_ecu_id,
+				"target_ecu": target_ecu,
+				"classification": classification,
 			}), 200
+
+		if classification.get("execution_mode") == "force_rogue_source":
+			result_obj.update(
+				{
+					"kyber_ok": False,
+					"dilithium_ok": False,
+					"hash_ok": False,
+					"version_ok": False,
+				}
+			)
+			return jsonify(
+				{
+					"result": result_obj,
+					"all_passed": False,
+					"accepted": False,
+					"failed_at": "source",
+					"reason": "Rogue/source-spoofed payload blocked before cryptographic pipeline.",
+					"firmware_version": firmware_version,
+					"firmware_ecu": firmware_ecu_id,
+					"target_ecu": target_ecu,
+					"classification": classification,
+				}
+			), 200
 		
 		# Stage 2-5: CRITICAL FIX - Call real OTA verification pipeline
 		# Don't just approve based on format checks - verify cryptography
 		try:
 			# Use OTA server to create properly signed and encrypted package
 			payload_bytes = payload.encode()
+			profile_meta = classification.get("profile", {})
+			if classification.get("scenario") == "rollback_attack":
+				baseline_current = profile_meta.get("legit_sw", "2.0.0")
+			else:
+				baseline_current = profile_meta.get("rollback_sw", "1.0.0")
 			update_package = app.ota_server.prepare_update(
 				payload=payload_bytes,
-				current_version="1.0.0",
+				current_version=baseline_current,
 				new_version=firmware_version or "1.0.0",
-				target_ecu=firmware_ecu_id or "UNKNOWN",
+				target_ecu=target_ecu,
 			)
-			
-			# Run through REAL verification pipeline (not mock)
+
+			if classification.get("scenario") == "tamper_attack":
+				sig = bytearray.fromhex(update_package["signature"])
+				sig[0] ^= 0xFF
+				update_package["signature"] = sig.hex()
+
 			pipeline_result = app.verification_pipeline.run(update_package)
 			
 			# Update result_obj with actual cryptographic verification results
@@ -403,10 +451,14 @@ def create_app() -> Flask:
 				return jsonify({
 					"result": result_obj,
 					"all_passed": False,
+					"accepted": False,
 					"failed_at": pipeline_result.get("failed_at", "unknown"),
 					"reason": f"Cryptographic verification failed at stage: {pipeline_result.get('failed_at')}",
 					"firmware_version": firmware_version,
 					"firmware_ecu": firmware_ecu_id,
+					"target_ecu": target_ecu,
+					"classification": classification,
+					"verification_trace": pipeline_result.get("verification_trace", []),
 				}), 200
 			
 		except Exception as e:
@@ -419,10 +471,13 @@ def create_app() -> Flask:
 			return jsonify({
 				"result": result_obj,
 				"all_passed": False,
+				"accepted": False,
 				"failed_at": "verification_error",
 				"reason": f"Verification error: {str(e)}",
 				"firmware_version": firmware_version,
 				"firmware_ecu": firmware_ecu_id,
+				"target_ecu": target_ecu,
+				"classification": classification,
 			}), 200
 		
 		# All checks passed - OTA update approved
@@ -438,7 +493,10 @@ def create_app() -> Flask:
 			"accepted": True,
 			"firmware_version": firmware_version,
 			"firmware_ecu": firmware_ecu_id,
+			"target_ecu": target_ecu,
 			"target_ecu_updated": True,
+			"classification": classification,
+			"verification_trace": pipeline_result.get("verification_trace", []),
 		}), 200
 
 	@app.get("/api/audit-log")

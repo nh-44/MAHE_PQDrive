@@ -279,6 +279,12 @@
       <label>Firmware Payload (Pipe-delimited)</label>
       <textarea id="inp-payload" rows="4" placeholder="Enter firmware payload..."></textarea>
     </div>
+    <div id="classification-panel" style="display:none;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:7px;margin-bottom:6px">
+      <div style="font-size:8px;color:#8b949e;text-transform:uppercase;letter-spacing:.05em">Detected Scenario</div>
+      <div id="cls-title" style="font-size:11px;font-weight:700;color:#58a6ff;margin-top:3px">—</div>
+      <div id="cls-meta" style="font-size:8px;color:#8b949e;margin-top:2px">—</div>
+      <div id="cls-reasoning" style="font-size:8px;color:#c9d1d9;margin-top:4px;line-height:1.4">—</div>
+    </div>
     <button class="btn green" id="btn-run" onclick="runOTAUpdate()" disabled>
       <span>▶</span> Execute OTA Update
     </button>
@@ -434,6 +440,11 @@ function resetUI() {
   document.getElementById('verdict').textContent = 'Awaiting packet';
   document.getElementById('crypto-proof').className = 'crypto-proof';
   document.getElementById('why').className = 'why';
+  const cls = document.getElementById('classification-panel');
+  cls.style.display = 'none';
+  document.getElementById('cls-title').textContent = '—';
+  document.getElementById('cls-meta').textContent = '—';
+  document.getElementById('cls-reasoning').textContent = '—';
 }
 
 function setNode(id, state) {
@@ -456,12 +467,42 @@ async function checkStage(name, pass) {
 }
 
 function updateECUVersion(ecuId, newVersion) {
-  const ecuElement = document.getElementById('ev-' + ecuId);
+  const uiMap = {
+    'adas_ecu': 'BRAKE',
+    'powertrain_ecu': 'POWERTRAIN',
+    'braking_ecu': 'CHARGER',
+    'steering_ecu': 'GATEWAY',
+    'maps_ecu': 'INFOTAINMENT'
+  };
+  const displayId = uiMap[ecuId] || ecuId;
+  const ecuElement = document.getElementById('ev-' + displayId);
   if(ecuElement) {
     ecuElement.textContent = 'v' + newVersion;
     ecuElement.style.color = '#3fb950';
     setTimeout(() => { ecuElement.style.color = ''; }, 1500);
   }
+}
+
+function renderClassification(classification) {
+  if(!classification) return;
+  const panel = document.getElementById('classification-panel');
+  const title = document.getElementById('cls-title');
+  const meta = document.getElementById('cls-meta');
+  const reasoning = document.getElementById('cls-reasoning');
+
+  const scenario = (classification.scenario || 'unknown').replaceAll('_', ' ').toUpperCase();
+  const confidence = (classification.confidence || 'unknown').toUpperCase();
+  const risk = (classification.risk || 'UNKNOWN').toUpperCase();
+  const iocs = classification.iocs || [];
+  const notes = classification.reasoning || [];
+
+  title.textContent = scenario;
+  meta.textContent = `Risk: ${risk} | Confidence: ${confidence}`;
+  reasoning.innerHTML = [
+    notes.length ? `Reasoning: ${notes.join(' | ')}` : 'Reasoning: n/a',
+    iocs.length ? `IoCs: ${iocs.join(', ')}` : 'IoCs: none',
+  ].join('<br/>');
+  panel.style.display = 'block';
 }
 
 async function runOTAUpdate() {
@@ -497,6 +538,7 @@ async function runOTAUpdate() {
       body: JSON.stringify({ scenario_name: "OTA Update", payload: payload, vehicle_state: vehicleState })
     });
     const result = await response.json();
+    renderClassification(result.classification);
 
     // Stage 1: Vehicle Status Check
     await checkStage('vehicle-status', result.result?.vehicle_status_ok ?? true);
@@ -517,10 +559,10 @@ async function runOTAUpdate() {
     if(!result.result?.kyber_ok) {
       setNode('n-tcu', 'fail');
       log('Kyber KEM verification failed', 'f');
-      document.getElementById('verdict').textContent = 'BLOCKED: Session key verification failed';
+      document.getElementById('verdict').textContent = result.failed_at === 'source' ? 'BLOCKED: Rogue source rejected' : 'BLOCKED: Session key verification failed';
       document.getElementById('why').className = 'why show';
-      document.getElementById('why-body').textContent = 'Kyber encapsulation invalid.';
-      document.getElementById('sys-badge').textContent = 'Blocked (Kyber)';
+      document.getElementById('why-body').textContent = result.reason || 'Kyber encapsulation invalid.';
+      document.getElementById('sys-badge').textContent = result.failed_at === 'source' ? 'Blocked (Source)' : 'Blocked (Kyber)';
       running = false;
       document.getElementById('btn-run').disabled = false;
       return;
@@ -533,7 +575,7 @@ async function runOTAUpdate() {
       log('Dilithium signature verification failed', 'f');
       document.getElementById('verdict').textContent = 'BLOCKED: Firmware signature invalid';
       document.getElementById('why').className = 'why show';
-      document.getElementById('why-body').textContent = 'Signature verification failed. Not from OEM server.';
+      document.getElementById('why-body').textContent = result.reason || 'Signature verification failed. Not from OEM server.';
       document.getElementById('sys-badge').textContent = 'Blocked (Signature)';
       running = false;
       document.getElementById('btn-run').disabled = false;
@@ -547,7 +589,7 @@ async function runOTAUpdate() {
       log('SHA3-256 integrity check failed', 'f');
       document.getElementById('verdict').textContent = 'BLOCKED: Payload integrity check failed';
       document.getElementById('why').className = 'why show';
-      document.getElementById('why-body').textContent = 'Payload hash does not match. Bit-flip detected.';
+      document.getElementById('why-body').textContent = result.reason || 'Payload hash does not match. Bit-flip detected.';
       document.getElementById('sys-badge').textContent = 'Blocked (Integrity)';
       running = false;
       document.getElementById('btn-run').disabled = false;
@@ -561,7 +603,7 @@ async function runOTAUpdate() {
       log('Version rollback detected', 'f');
       document.getElementById('verdict').textContent = 'BLOCKED: Rollback attack detected';
       document.getElementById('why').className = 'why show';
-      document.getElementById('why-body').textContent = 'Version must always increase. Downgrade blocked.';
+      document.getElementById('why-body').textContent = result.reason || 'Version must always increase. Downgrade blocked.';
       document.getElementById('sys-badge').textContent = 'Blocked (Version)';
       running = false;
       document.getElementById('btn-run').disabled = false;
@@ -578,9 +620,9 @@ async function runOTAUpdate() {
     log('All 5 verification stages passed', 's');
     
     // Update target ECU version if available
-    if(result.firmware_ecu && result.firmware_version) {
-      updateECUVersion(result.firmware_ecu, result.firmware_version);
-      log(`${result.firmware_ecu} updated to v${result.firmware_version}`, 's');
+    if(result.target_ecu && result.firmware_version) {
+      updateECUVersion(result.target_ecu, result.firmware_version);
+      log(`${result.target_ecu} updated to v${result.firmware_version}`, 's');
     }
     
     log('OTA update accepted and applied', 's');

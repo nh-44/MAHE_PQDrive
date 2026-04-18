@@ -98,9 +98,8 @@ def test_pipeline_fails_on_tamper() -> None:
 		new_version="2.0.0",
 	)
 
-	tampered_payload = bytearray(package["payload"])
-	tampered_payload[0] ^= 0x01
-	package["payload"] = bytes(tampered_payload)
+	# Payload is hex-encoded in transport; corrupt hash to simulate integrity tamper
+	package["package_hash"] = ("0" if package["package_hash"][0] != "0" else "1") + package["package_hash"][1:]
 
 	result = pipeline.run(package)
 	assert result["hash_ok"] is False
