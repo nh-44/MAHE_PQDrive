@@ -2,6 +2,7 @@ FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
 
 WORKDIR /app
 
@@ -15,6 +16,11 @@ RUN pip install --upgrade pip \
 
 COPY . /app
 
+# Health check for dashboard service
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import requests; requests.get('http://localhost:5000/health')" || exit 1
+
 EXPOSE 5000
 
-CMD ["python", "main.py"]
+# Default: run dashboard service (can be overridden with ENTRYPOINT)
+CMD ["python", "dashboard/app.py"]

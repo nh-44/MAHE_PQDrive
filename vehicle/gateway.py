@@ -28,7 +28,26 @@ class VehicleGateway:
 		self.request_log: list[dict] = []
 		self.charger_security = charger_security
 		self.ecu_manager = ecu_manager or ECUDomainManager()
-		self._seen_request_ids: set[str] = set()
+		
+		# SECURITY FIX (Phase 7C): Make replay tracking persistent (not in-memory)
+		import sqlite3
+		from pathlib import Path
+		
+		db_path = Path("gateway_replay_log.db")
+		self.db = sqlite3.connect(str(db_path), check_same_thread=False)
+		
+		# Create replay tracking table if not exists
+		self.db.execute("""
+			CREATE TABLE IF NOT EXISTS request_log_persistent (
+				request_id TEXT PRIMARY KEY,
+				timestamp TEXT,
+				source TEXT,
+				target_ecu TEXT,
+				accepted INTEGER
+			)
+		""")
+		self.db.commit()
+		
 		self._pending_challenges: dict[str, str] = {}
 
 	def issue_charger_challenge(self, request_id: str) -> str:
@@ -41,13 +60,23 @@ class VehicleGateway:
 
 	def receive_update_request(self, request: dict) -> dict:
 		"""Validate OTA source and run cryptographic verification pipeline."""
+		from datetime import datetime, timezone
+		
 		request_id = request.get("request_id")
-		if request_id and request_id in self._seen_request_ids:
-			return {
-				"accepted": False,
-				"failed_at": "replay",
-				"reason": "request replay detected",
-			}
+		
+		# SECURITY FIX (Phase 7C): Check persistent replay log - only block if it was ACCEPTED before
+		if request_id:
+			cursor = self.db.execute(
+				"SELECT accepted FROM request_log_persistent WHERE request_id = ?",
+				(request_id,)
+			)
+			existing = cursor.fetchone()
+			if existing and existing[0] == 1:  # 1 = accepted, block replay of accepted requests
+				return {
+					"accepted": False,
+					"failed_at": "replay",
+					"reason": "request replay detected (duplicate request_id with successful prior acceptance)",
+				}
 
 		self.request_log.append(
 			{
@@ -100,11 +129,86 @@ class VehicleGateway:
 				"reason": "invalid source — rogue charger rejected",
 			}
 
+		# SECURITY FIX (Phase 7C): Record request in persistent DB before processing (as rejected by default)
 		if request_id:
-			self._seen_request_ids.add(request_id)
+			try:
+				self.db.execute(
+					"INSERT OR IGNORE INTO request_log_persistent (request_id, timestamp, source, target_ecu, accepted) VALUES (?, ?, ?, ?, ?)",
+					(request_id, datetime.now(timezone.utc).isoformat(), request.get("source"), target_ecu, 0)
+				)
+				self.db.commit()
+			except Exception as e:
+				# Log but don't fail on DB error
+				print(f"Warning: Failed to record replay log: {e}")
+
+		# SECURITY FIX (Phase 7B): Decrypt payload with Kyber session key
+		try:
+			from core import kyber
+			from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
+			
+			# Must have ALL THREE encryption components: ciphertext + encrypted_payload + nonce
+			if "encrypted_payload" not in request or "ciphertext" not in request or "nonce" not in request:
+				return {
+					"accepted": False,
+					"failed_at": "encryption_format",
+					"reason": "Missing required encryption components (ciphertext, encrypted_payload, nonce)",
+				}
+			
+			# Step 1: Decapsulate Kyber ciphertext to recover session key
+			session_key = kyber.decapsulate(
+				self.pipeline.vehicle_private_key,
+				bytes.fromhex(request["ciphertext"])
+			)
+			
+			# Step 2: Decrypt payload using session key
+			cipher = ChaCha20Poly1305(session_key[:32])
+			nonce = bytes.fromhex(request["nonce"])
+			encrypted_payload = bytes.fromhex(request["encrypted_payload"])
+			
+			try:
+				decrypted_payload = cipher.decrypt(nonce, encrypted_payload, None)
+				# Store decrypted payload for pipeline verification
+				request["payload"] = decrypted_payload.hex()
+			except Exception as e:
+				return {
+					"accepted": False,
+					"failed_at": "decryption",
+					"reason": f"Failed to decrypt payload: {str(e)}",
+				}
+		except Exception as e:
+			# If decryption fails, fail safely
+			return {
+				"accepted": False,
+				"failed_at": "decryption_setup",
+				"reason": f"Decryption setup error: {str(e)}",
+			}
+
+		# SECURITY FIX (Phase 7C): Validate ECU target matches firmware (anti-ECU-spoofing)
+		# The target_ecu must match what's encoded in the firmware payload
+		firmware_ecu = request.get("target_ecu")
+		if firmware_ecu:
+			# ECU domain manager should validate this matches expected ECU for this firmware type
+			if not self.ecu_manager.is_valid_ecu_target(firmware_ecu):
+				return {
+					"accepted": False,
+					"failed_at": "ecu_validation",
+					"reason": f"Invalid ECU target: {firmware_ecu} not in allowed set",
+				}
 
 		result = self.pipeline.run(request)
 		result["accepted"] = result["all_passed"]
+		
+		# SECURITY FIX (Phase 7C): Update DB with final result (1=accepted, 0=rejected)
+		if request_id and result.get("accepted"):
+			try:
+				self.db.execute(
+					"UPDATE request_log_persistent SET accepted = 1 WHERE request_id = ?",
+					(request_id,)
+				)
+				self.db.commit()
+			except Exception as e:
+				print(f"Warning: Failed to update replay log: {e}")
+		
 		if charger_auth and self.charger_security is not None:
 			profile = self.charger_security._profiles.get(charger_auth.get("charger_id"))
 			if profile is not None:

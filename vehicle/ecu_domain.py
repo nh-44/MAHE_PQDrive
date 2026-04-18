@@ -46,3 +46,7 @@ class ECUDomainManager:
 		if self.get_domain(ecu_name) == SAFETY_CRITICAL:
 			return bool(self.charging_policy.get("allow_safety_critical_updates_while_charging", False))
 		return bool(self.charging_policy.get("allow_infotainment_updates_while_charging", True))
+
+	def is_valid_ecu_target(self, ecu_name: str) -> bool:
+		"""Return True if ECU name is a valid, configured ECU target."""
+		return ecu_name in self.ecus

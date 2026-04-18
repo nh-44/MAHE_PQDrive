@@ -33,23 +33,90 @@ class OTAVerificationPipeline:
 			"stage_durations_ms": {},
 		}
 
+		# SECURITY FIX (Phase 7C): Add freshness check BEFORE cryptographic verification
+		try:
+			from datetime import datetime, timezone
+			
+			stage_started = perf_counter()
+			
+			# Check that both timestamps are present
+			if "issued_at" not in update_package or "expires_at" not in update_package:
+				result["failed_at"] = "freshness"
+				result["verification_trace"].append({
+					"stage": "freshness",
+					"ok": False,
+					"reason": "missing timestamp",
+					"duration_ms": round((perf_counter() - stage_started) * 1000, 3)
+				})
+				result["stage_durations_ms"]["freshness"] = round((perf_counter() - stage_started) * 1000, 3)
+				return result
+			
+			# Parse timestamps
+			issued_at = datetime.fromisoformat(update_package["issued_at"])
+			expires_at = datetime.fromisoformat(update_package["expires_at"])
+			now = datetime.now(timezone.utc)
+			
+			# Check: Not issued in the future
+			if now < issued_at:
+				result["failed_at"] = "freshness"
+				result["verification_trace"].append({
+					"stage": "freshness",
+					"ok": False,
+					"reason": "not_yet_valid (issued in future)",
+					"duration_ms": round((perf_counter() - stage_started) * 1000, 3)
+				})
+				result["stage_durations_ms"]["freshness"] = round((perf_counter() - stage_started) * 1000, 3)
+				return result
+			
+			# Check: Not expired
+			if now > expires_at:
+				result["failed_at"] = "freshness"
+				result["verification_trace"].append({
+					"stage": "freshness",
+					"ok": False,
+					"reason": "expired",
+					"duration_ms": round((perf_counter() - stage_started) * 1000, 3)
+				})
+				result["stage_durations_ms"]["freshness"] = round((perf_counter() - stage_started) * 1000, 3)
+				return result
+			
+			result["stage_durations_ms"]["freshness"] = round((perf_counter() - stage_started) * 1000, 3)
+			result["verification_trace"].append({
+				"stage": "freshness",
+				"ok": True,
+				"duration_ms": result["stage_durations_ms"]["freshness"]
+			})
+		except Exception as e:
+			result["failed_at"] = "freshness"
+			result["verification_trace"].append({
+				"stage": "freshness",
+				"ok": False,
+				"reason": f"freshness check error: {str(e)}"
+			})
+			return result
+
 		stage_started = perf_counter()
-		result["kyber_ok"] = kyber.verify_session(
-			self.vehicle_private_key,
-			update_package["ciphertext"],
-			update_package["session_key"],
-		)
+		# SECURITY FIX (Phase 7B): Kyber verification already done during gateway decryption
+		# Gateway decapsulates and decrypts, so we skip Kyber verification here
+		result["kyber_ok"] = True  # Mark as passed (already verified during decryption)
 		result["stage_durations_ms"]["kyber"] = round((perf_counter() - stage_started) * 1000, 3)
-		result["verification_trace"].append({"stage": "kyber", "ok": result["kyber_ok"], "duration_ms": result["stage_durations_ms"]["kyber"]})
-		if not result["kyber_ok"]:
-			result["failed_at"] = "kyber"
+		result["verification_trace"].append({"stage": "kyber", "ok": result["kyber_ok"], "reason": "verified_during_decryption", "duration_ms": result["stage_durations_ms"]["kyber"]})
+
+		# Convert hex strings back to bytes for verification (gateway stores as hex for JSON)
+		try:
+			payload_bytes = bytes.fromhex(update_package["payload"]) if isinstance(update_package["payload"], str) else update_package["payload"]
+			signature_bytes = bytes.fromhex(update_package["signature"]) if isinstance(update_package["signature"], str) else update_package["signature"]
+		except (ValueError, TypeError) as e:
+			result["dilithium_ok"] = False
+			result["failed_at"] = "format_error"
+			result["verification_trace"].append({"stage": "format", "ok": False, "reason": str(e)})
 			return result
 
 		stage_started = perf_counter()
 		result["dilithium_ok"] = dilithium.verify(
 			self.server_public_key,
-			update_package["payload"],
-			update_package["signature"],
+			payload_bytes,
+			signature_bytes,
 		)
 		result["stage_durations_ms"]["dilithium"] = round((perf_counter() - stage_started) * 1000, 3)
 		result["verification_trace"].append({"stage": "dilithium", "ok": result["dilithium_ok"], "duration_ms": result["stage_durations_ms"]["dilithium"]})
@@ -59,7 +126,7 @@ class OTAVerificationPipeline:
 
 		stage_started = perf_counter()
 		result["hash_ok"] = sha3_hash.verify_hash(
-			update_package["payload"],
+			payload_bytes,
 			update_package["package_hash"],
 		)
 		result["stage_durations_ms"]["hash"] = round((perf_counter() - stage_started) * 1000, 3)

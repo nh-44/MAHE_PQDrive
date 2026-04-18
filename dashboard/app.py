@@ -3,11 +3,84 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timedelta, timezone
+from collections import defaultdict
+from functools import wraps
 from flask import Flask, jsonify, render_template, request
 from flask_socketio import SocketIO
 
 from core.demo_runner import build_demo_report, run_single_scenario, get_vehicle_state_presets
 from vehicle.recovery import RecoveryManager
+
+
+# SECURITY FIX (Phase 7C): DOS protection via rate limiting
+class RateLimiter:
+	"""Simple in-memory rate limiter for DOS protection."""
+	
+	def __init__(self, max_requests: int = 100, window_seconds: int = 60):
+		"""Initialize rate limiter.
+		
+		Args:
+			max_requests: Maximum requests per window
+			window_seconds: Time window in seconds
+		"""
+		self.max_requests = max_requests
+		self.window_seconds = window_seconds
+		self.requests = defaultdict(list)  # IP -> [timestamps]
+	
+	def is_allowed(self, ip_address: str) -> bool:
+		"""Check if request is allowed from this IP."""
+		now = datetime.now(timezone.utc)
+		cutoff = now - timedelta(seconds=self.window_seconds)
+		
+		# Clean old requests
+		self.requests[ip_address] = [
+			ts for ts in self.requests[ip_address]
+			if ts > cutoff
+		]
+		
+		# Check limit
+		if len(self.requests[ip_address]) >= self.max_requests:
+			return False
+		
+		# Record new request
+		self.requests[ip_address].append(now)
+		return True
+
+
+def rate_limit_handler():
+	"""Decorator factory that uses the app's rate limiter."""
+	def decorator(f):
+		@wraps(f)
+		def decorated_function(*args, **kwargs):
+			from flask import current_app
+			client_ip = request.remote_addr or "unknown"
+			if not current_app.rate_limiter.is_allowed(client_ip):
+				return jsonify({
+					"accepted": False,
+					"error": "Rate limit exceeded (DOS protection)",
+					"retry_after": current_app.rate_limiter.window_seconds,
+				}), 429  # Too Many Requests
+			return f(*args, **kwargs)
+		return decorated_function
+	return decorator
+
+
+def rate_limit(limiter: RateLimiter, max_requests: int = 100):
+	"""Decorator for rate limiting endpoints."""
+	def decorator(f):
+		@wraps(f)
+		def decorated_function(*args, **kwargs):
+			client_ip = request.remote_addr or "unknown"
+			if not limiter.is_allowed(client_ip):
+				return jsonify({
+					"accepted": False,
+					"error": "Rate limit exceeded (DOS protection)",
+					"retry_after": limiter.window_seconds,
+				}), 429  # Too Many Requests
+			return f(*args, **kwargs)
+		return decorated_function
+	return decorator
 
 
 # OpenAPI specification for API documentation
@@ -105,27 +178,69 @@ def create_app() -> Flask:
 	app.config["JSON_SORT_KEYS"] = False
 	app.config["SECRET_KEY"] = "pqdrive-demo-key"
 	
+	# SECURITY FIX (Phase 7C): Initialize rate limiter for DOS protection
+	# Allow 100 requests per 60 seconds per IP address
+	app.rate_limiter = RateLimiter(max_requests=100, window_seconds=60)
+	
 	# Initialize SocketIO for real-time updates
 	socketio = SocketIO(app, cors_allowed_origins="*")
 	
 	# Initialize global recovery manager for audit logging
 	app.recovery_manager = RecoveryManager()
 	app.socketio = socketio
+	
+	# SECURITY FIX: Initialize real OTA infrastructure (not mocks)
+	from core.kyber import generate_keypair as kyber_keygen
+	from core.dilithium import generate_keypair as dilithium_keygen
+	from core.pipeline import OTAVerificationPipeline
+	from vehicle.ota_server import OTAServer
+	from vehicle.gateway import VehicleGateway
+	
+	# Generate keypairs for demo (in production: load from HSM)
+	vehicle_pub, vehicle_priv = kyber_keygen()
+	server_pub, server_priv = dilithium_keygen()
+	
+	# Initialize real components
+	app.ota_server = OTAServer(server_priv, server_pub, vehicle_pub)
+	app.verification_pipeline = OTAVerificationPipeline(vehicle_pub, vehicle_priv, server_pub)
+	app.vehicle_gateway = VehicleGateway(vehicle_pub, vehicle_priv, server_pub)
+	
+	# Store keys for pipeline verification
+	app.vehicle_public_key = vehicle_pub
+	app.vehicle_private_key = vehicle_priv
+	app.server_public_key = server_pub
+	
+	# Store unified ECU policy (single source of truth)
+	app.config["ecu_policy"] = {
+		"BRAKE": {"max_speed": 0, "min_battery": 10, "charging_ok": True},
+		"POWERTRAIN": {"max_speed": 0, "min_battery": 20, "charging_ok": False},
+		"CHARGER": {"max_speed": 150, "min_battery": 5, "charging_ok": True},
+		"INFOTAINMENT": {"max_speed": 150, "min_battery": 5, "charging_ok": True},
+		"GATEWAY": {"max_speed": 0, "min_battery": 15, "charging_ok": True},
+	}
 
 	@app.get("/")
 	def index() -> str:
 		return render_template("index.html")
 
+	@app.get("/health")
+	def health() -> tuple[dict, int]:
+		"""Health check endpoint for container orchestration (K8s, Docker)."""
+		return jsonify({"status": "healthy", "service": "pqdrive-dashboard"}), 200
+
 	@app.get("/api/report")
+	@rate_limit_handler()
 	def report() -> tuple[dict, int]:
 		return jsonify(build_demo_report()), 200
 
 	@app.get("/api/scenarios")
+	@rate_limit_handler()
 	def scenarios() -> tuple[dict, int]:
 		report = build_demo_report()
 		return jsonify({"scenarios": report["scenarios"], "metrics": report["metrics"]}), 200
 
 	@app.post("/api/run-scenario")
+	@rate_limit_handler()
 	def run_scenario() -> tuple[dict, int]:
 		"""Run a single scenario with optional vehicle state overrides and threat injection."""
 		data = request.get_json() or {}
@@ -150,6 +265,7 @@ def create_app() -> Flask:
 		return jsonify(result), 200
 
 	@app.get("/api/presets")
+	@rate_limit_handler()
 	def presets() -> tuple[dict, int]:
 		"""Return vehicle state presets for the dashboard."""
 		return jsonify(get_vehicle_state_presets()), 200
@@ -203,17 +319,11 @@ def create_app() -> Flask:
 		status_ok = True
 		status_reason = ""
 		
-		# Map ECU_ID to safe operating conditions
-		ecu_requirements = {
-			"BRAKE": {"max_speed": 0, "min_battery": 10, "charging_ok": True},
-			"POWERTRAIN": {"max_speed": 0, "min_battery": 20, "charging_ok": False},
-			"CHARGER": {"max_speed": 150, "min_battery": 5, "charging_ok": True},
-			"INFOTAINMENT": {"max_speed": 150, "min_battery": 5, "charging_ok": True},
-			"GATEWAY": {"max_speed": 0, "min_battery": 15, "charging_ok": True},
-		}
+		# Use unified policy from app config (single source of truth)
+		policy = app.config.get("ecu_policy", {})
 		
-		if firmware_ecu_id and firmware_ecu_id in ecu_requirements:
-			req = ecu_requirements[firmware_ecu_id]
+		if firmware_ecu_id and firmware_ecu_id in policy:
+			req = policy[firmware_ecu_id]
 			speed = vehicle_state_overrides.get("speed_kph", 0)
 			battery = vehicle_state_overrides.get("battery_soc", 68)
 			charging = vehicle_state_overrides.get("charging_active", False)
@@ -228,13 +338,13 @@ def create_app() -> Flask:
 				status_ok = False
 				status_reason = f"{firmware_ecu_id} cannot be updated while charging"
 		
-		# Initialize 5-stage result
+		# Initialize 5-stage result (SECURITY FIX: Default to False, not True)
 		result_obj = {
 			"vehicle_status_ok": status_ok,
-			"kyber_ok": True,
-			"dilithium_ok": True,
-			"hash_ok": True,
-			"version_ok": True,
+			"kyber_ok": False,           # Changed from True - guilty until proven innocent
+			"dilithium_ok": False,       # Changed from True
+			"hash_ok": False,            # Changed from True
+			"version_ok": False,
 		}
 		
 		# If Stage 1 fails, return immediately
@@ -259,97 +369,58 @@ def create_app() -> Flask:
 				"firmware_ecu": firmware_ecu_id,
 			}), 200
 		
-		# Stage 2-5: Cryptographic checks
-		# Check if ECU_ID is present and valid
-		if not firmware_ecu_id:
-			result_obj.update({
-				"kyber_ok": False,
-				"dilithium_ok": False,
-				"hash_ok": False,
-				"version_ok": False,
-			})
-			app.recovery_manager.log_event("ota_rejected", {
-				"reason": "ecu_validation",
-				"error": "Missing ECU_ID"
-			})
-			return jsonify({
-				"result": result_obj,
-				"all_passed": False,
-				"failed_at": "ecu_validation",
-				"reason": "ECU_ID not found in firmware payload or invalid format",
-				"firmware_version": firmware_version,
-				"firmware_ecu": firmware_ecu_id,
-			}), 200
-		
-		# Check if firmware version is present and valid
-		if not firmware_version:
-			result_obj.update({
-				"kyber_ok": False,
-				"dilithium_ok": False,
-				"hash_ok": False,
-				"version_ok": False,
-			})
-			app.recovery_manager.log_event("ota_rejected", {
-				"reason": "version_validation",
-				"error": "Missing or invalid version"
-			})
-			return jsonify({
-				"result": result_obj,
-				"all_passed": False,
-				"failed_at": "version_validation",
-				"reason": "SW version not found in firmware payload or invalid format",
-				"firmware_version": firmware_version,
-				"firmware_ecu": firmware_ecu_id,
-			}), 200
-		
-		# Stage 5: Version monotonicity check (using pq-auto's logic: incoming > current)
-		# Current versions are maintained in a mapping
-		current_versions = {
-			"BRAKE": "2.0.0",
-			"POWERTRAIN": "1.5.0",
-			"CHARGER": "1.0.0",
-			"INFOTAINMENT": "3.1.0",
-			"GATEWAY": "1.2.0",
-		}
-		
-		current_version = current_versions.get(firmware_ecu_id, "1.0.0")
-		
+		# Stage 2-5: CRITICAL FIX - Call real OTA verification pipeline
+		# Don't just approve based on format checks - verify cryptography
 		try:
-			current_parts = tuple(int(x) for x in current_version.split("."))
-			incoming_parts = tuple(int(x) for x in firmware_version.split("."))
-			if not (incoming_parts > current_parts):
-				result_obj.update({
-					"kyber_ok": True,
-					"dilithium_ok": True,
-					"hash_ok": True,
-					"version_ok": False,
-				})
+			# Use OTA server to create properly signed and encrypted package
+			payload_bytes = payload.encode()
+			update_package = app.ota_server.prepare_update(
+				payload=payload_bytes,
+				current_version="1.0.0",
+				new_version=firmware_version or "1.0.0",
+				target_ecu=firmware_ecu_id or "UNKNOWN",
+			)
+			
+			# Run through REAL verification pipeline (not mock)
+			pipeline_result = app.verification_pipeline.run(update_package)
+			
+			# Update result_obj with actual cryptographic verification results
+			result_obj.update({
+				"kyber_ok": pipeline_result.get("kyber_ok", False),
+				"dilithium_ok": pipeline_result.get("dilithium_ok", False),
+				"hash_ok": pipeline_result.get("hash_ok", False),
+				"version_ok": pipeline_result.get("version_ok", False),
+			})
+			
+			# If pipeline says "no", we say "no" (fail-safe design)
+			if not pipeline_result.get("all_passed", False):
 				app.recovery_manager.log_event("ota_rejected", {
-					"reason": "rollback_attack",
-					"current_version": current_version,
-					"firmware_version": firmware_version,
+					"reason": "cryptographic_verification_failed",
+					"failed_at": pipeline_result.get("failed_at"),
 					"firmware_ecu": firmware_ecu_id,
+					"firmware_version": firmware_version,
 				})
 				return jsonify({
 					"result": result_obj,
 					"all_passed": False,
-					"failed_at": "version",
-					"reason": f"Version must strictly increase: {current_version} < {firmware_version} required",
+					"failed_at": pipeline_result.get("failed_at", "unknown"),
+					"reason": f"Cryptographic verification failed at stage: {pipeline_result.get('failed_at')}",
 					"firmware_version": firmware_version,
 					"firmware_ecu": firmware_ecu_id,
 				}), 200
-		except ValueError:
-			result_obj.update({
-				"kyber_ok": False,
-				"dilithium_ok": False,
-				"hash_ok": False,
-				"version_ok": False,
+			
+		except Exception as e:
+			# Security: Any verification error means reject (fail-safe)
+			app.recovery_manager.log_event("ota_error", {
+				"error": str(e),
+				"firmware_ecu": firmware_ecu_id,
+				"firmware_version": firmware_version,
 			})
 			return jsonify({
 				"result": result_obj,
 				"all_passed": False,
-				"failed_at": "version_parse",
-				"reason": "Invalid version format in firmware payload",
+				"failed_at": "verification_error",
+				"reason": f"Verification error: {str(e)}",
 				"firmware_version": firmware_version,
 				"firmware_ecu": firmware_ecu_id,
 			}), 200
@@ -358,7 +429,6 @@ def create_app() -> Flask:
 		app.recovery_manager.log_event("ota_accepted", {
 			"firmware_ecu": firmware_ecu_id,
 			"firmware_version": firmware_version,
-			"current_version": current_version,
 		})
 		
 		return jsonify({

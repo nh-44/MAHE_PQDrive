@@ -14,8 +14,10 @@ def simulate_tamper_attack(gateway: VehicleGateway, server: OTAServer) -> dict:
 		new_version="2.0.0",
 	)
 
-	tampered = bytearray(package["payload"])
+	# Convert hex payload back to bytes for tampering
+	payload_bytes = bytes.fromhex(package["payload"])
+	tampered = bytearray(payload_bytes)
 	tampered[0] ^= 0x01
-	package["payload"] = bytes(tampered)
+	package["payload"] = tampered.hex()  # Store back as hex
 
 	return gateway.receive_update_request(package)
