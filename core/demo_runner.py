@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from statistics import mean
 from time import perf_counter
+from typing import Any
 
 from attacks.charger_security_demo import simulate_authenticated_charger_update, simulate_juice_jacking_attempt
 from attacks.hndl_demo import run_hndl_demo
@@ -27,6 +28,113 @@ def _run_scenario(name: str, runner) -> dict:
 		"duration_ms": duration_ms,
 		"accepted": bool(result.get("accepted", False)),
 		"failed_at": result.get("failed_at", result.get("reason")),
+		"result": result,
+	}
+
+
+def run_single_scenario(scenario_name: str, vehicle_state_overrides: dict[str, Any] | None = None) -> dict:
+	"""Run a single scenario with optional vehicle state overrides for interactive demo."""
+	if vehicle_state_overrides is None:
+		vehicle_state_overrides = {}
+
+	vehicle_public_key, vehicle_private_key = kyber.generate_keypair()
+	server_public_key, server_private_key = dilithium.generate_keypair()
+	ecu_manager = ECUDomainManager()
+	charger_manager = ChargerSecurityManager()
+	trusted_charger = charger_manager.register_charger("north-road-fast-charger")
+	recovery = RecoveryManager()
+
+	server = OTAServer(
+		server_private_key=server_private_key,
+		server_public_key=server_public_key,
+		vehicle_public_key=vehicle_public_key,
+	)
+	gateway = VehicleGateway(
+		vehicle_public_key=vehicle_public_key,
+		vehicle_private_key=vehicle_private_key,
+		server_public_key=server_public_key,
+		charger_security=charger_manager,
+		ecu_manager=ecu_manager,
+	)
+
+	# Default vehicle state
+	default_state = {
+		"charging_active": True,
+		"data_link_locked": True,
+		"battery_soc": 68,
+		"speed_kph": 0,
+		"thermal_state": "normal",
+		"temperature_c": 31,
+	}
+	default_state.update(vehicle_state_overrides)
+	vehicle_state = default_state
+
+	recovery.take_snapshot(
+		"braking_ecu",
+		"2.0.0",
+		vehicle_state,
+	)
+
+	# Scenario runners
+	scenario_runners: dict[str, callable] = {
+		"Legitimate OTA": lambda: gateway.receive_update_request(
+			server.prepare_update(
+				payload=b"firmware_v2",
+				current_version="1.0.0",
+				new_version="2.0.0",
+				target_ecu="maps_ecu",
+			)
+		),
+		"Trusted Charger OTA": lambda: simulate_authenticated_charger_update(
+			gateway,
+			server,
+			charger_manager,
+			trusted_charger,
+			target_ecu="braking_ecu",
+		),
+		"Anti-Juice Jacking": lambda: simulate_juice_jacking_attempt(
+			gateway,
+			server,
+			charger_manager,
+			trusted_charger,
+			target_ecu="braking_ecu",
+		),
+		"Replay Attack": lambda: gateway.receive_update_request(
+			server.prepare_update(
+				payload=b"firmware_v3_secure",
+				current_version="2.0.0",
+				new_version="2.1.0",
+				target_ecu="braking_ecu",
+			)
+		) or gateway.receive_update_request(
+			server.prepare_update(
+				payload=b"firmware_v3_secure",
+				current_version="2.0.0",
+				new_version="2.1.0",
+				target_ecu="braking_ecu",
+			)
+		),
+		"Rogue Charger Attack": lambda: simulate_rogue_charger_attack(gateway),
+		"Rollback Attack": lambda: simulate_rollback_attack(gateway, server),
+		"Tamper Attack": lambda: simulate_tamper_attack(gateway, server),
+	}
+
+	if scenario_name not in scenario_runners:
+		return {
+			"error": f"Unknown scenario: {scenario_name}",
+			"available_scenarios": list(scenario_runners.keys()),
+		}
+
+	started = perf_counter()
+	result = scenario_runners[scenario_name]()
+	duration_ms = round((perf_counter() - started) * 1000, 3)
+
+	return {
+		"name": scenario_name,
+		"duration_ms": duration_ms,
+		"accepted": bool(result.get("accepted", False)),
+		"failed_at": result.get("failed_at", result.get("reason")),
+		"vehicle_state": vehicle_state,
 		"result": result,
 	}
 

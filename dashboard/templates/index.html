@@ -16,11 +16,72 @@
       </div>
       <div class="hero-actions">
         <button id="refreshBtn">Refresh demo</button>
-        <a href="#scenarios">View scenarios</a>
+        <a href="#interactive">Interactive Controls</a>
       </div>
     </section>
 
     <section class="stats" id="stats"></section>
+
+    <section class="panel" id="interactive">
+      <div class="panel-head">
+        <h2>Interactive Scenario Runner</h2>
+        <span>Select a scenario and adjust vehicle state to see real-time security outcomes</span>
+      </div>
+      
+      <div class="interactive-controls">
+        <div class="control-group">
+          <label>Vehicle State Parameters</label>
+          <div class="state-controls">
+            <div class="control-item">
+              <label for="speed">Speed (km/h): <span id="speedValue">0</span></label>
+              <input type="range" id="speed" min="0" max="100" value="0" step="5">
+            </div>
+            <div class="control-item">
+              <label for="battery">Battery SOC (%): <span id="batteryValue">68</span></label>
+              <input type="range" id="battery" min="10" max="100" value="68" step="5">
+            </div>
+            <div class="control-item">
+              <label for="temperature">Temperature (°C): <span id="tempValue">31</span></label>
+              <input type="range" id="temperature" min="0" max="80" value="31" step="2">
+            </div>
+            <div class="control-item">
+              <label>
+                <input type="checkbox" id="dataLocked" checked> Data-line Locked
+              </label>
+            </div>
+            <div class="control-item">
+              <label>
+                <input type="checkbox" id="charging" checked> Charging Active
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <label>Select Scenario</label>
+          <div class="scenario-buttons">
+            <button class="scenario-btn" data-scenario="Legitimate OTA">✓ Legitimate OTA</button>
+            <button class="scenario-btn" data-scenario="Trusted Charger OTA">✓ Trusted Charger OTA</button>
+            <button class="scenario-btn" data-scenario="Anti-Juice Jacking">✗ Anti-Juice Jacking</button>
+            <button class="scenario-btn" data-scenario="Replay Attack">✗ Replay Attack</button>
+            <button class="scenario-btn" data-scenario="Rogue Charger Attack">✗ Rogue Charger</button>
+            <button class="scenario-btn" data-scenario="Rollback Attack">✗ Rollback Attack</button>
+            <button class="scenario-btn" data-scenario="Tamper Attack">✗ Tamper Attack</button>
+          </div>
+        </div>
+
+        <div id="runResult" class="run-result hidden">
+          <div class="result-header">
+            <h3 id="resultName"></h3>
+            <div class="result-status">
+              <span id="resultStatus"></span>
+              <span id="resultLatency"></span>
+            </div>
+          </div>
+          <div id="resultDetails" class="result-details"></div>
+        </div>
+      </div>
+    </section>
 
     <section class="panel">
       <div class="panel-head">
