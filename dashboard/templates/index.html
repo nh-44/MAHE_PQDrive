@@ -87,6 +87,10 @@
           <div id="threatStatus" class="threat-status"></div>
         </div>
 
+        <div class="control-group">
+          <button id="simulateBtn" class="btn-simulate">▶ Simulate Scenario</button>
+        </div>
+
         <div id="runResult" class="run-result hidden">
           <div class="result-header">
             <h3 id="resultName"></h3>
@@ -98,6 +102,15 @@
           <div id="resultDetails" class="result-details"></div>
         </div>
       </div>
+    </section>
+
+    <section class="panel" id="chainOfThought">
+      <div class="panel-head">
+        <h2>Chain of Thought: Detailed Event Logs</h2>
+        <span>Step-by-step cryptographic verification and security decision points</span>
+      </div>
+      <div id="chainLogs" class="chain-logs"></div>
+      <div id="cryptoExplainer" class="crypto-explainer"></div>
     </section>
 
     <section class="panel">

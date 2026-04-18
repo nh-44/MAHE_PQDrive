@@ -130,11 +130,127 @@ def create_app() -> Flask:
 		"""Return vehicle state presets for the dashboard."""
 		return jsonify(get_vehicle_state_presets()), 200
 
-	@app.get("/api/audit-log")
-	def audit_log() -> tuple[list, int]:
-		"""Return audit log from the demo report."""
-		report = build_demo_report()
-		return jsonify(report.get("recovery", [])), 200
+	@app.get("/api/education")
+	def education() -> tuple[dict, int]:
+		"""Return educational content about cryptography and security principles."""
+		return jsonify({
+			"principles": {
+				"kyber_kem": {
+					"title": "Kyber Key Encapsulation Mechanism",
+					"category": "Post-Quantum Cryptography",
+					"description": "NIST-standardized lattice-based key encapsulation that's safe against quantum computers",
+					"purpose": "Establishes quantum-resistant shared secrets between OTA server and vehicle",
+					"security_property": "IND-CCA2 secure - protects against chosen-ciphertext attacks",
+					"why_it_matters": "Classical RSA/ECDH would be broken by future quantum computers. Kyber provides future-proof security.",
+				},
+				"dilithium_signature": {
+					"title": "Dilithium Digital Signatures",
+					"category": "Post-Quantum Cryptography",
+					"description": "NIST-standardized lattice-based digital signature algorithm",
+					"purpose": "Proves firmware origin and integrity, prevents code injection",
+					"security_property": "SUF-CMA secure - unforgeable even with chosen message attacks",
+					"why_it_matters": "Ensures OTA updates come from legitimate OTA servers, not rogue sources",
+				},
+				"sha3_hash": {
+					"title": "SHA3-256 Cryptographic Hash",
+					"category": "Symmetric Cryptography",
+					"description": "Quantum-resistant cryptographic hash function (unaffected by quantum computers)",
+					"purpose": "Provides bit-level integrity checking of firmware payload",
+					"security_property": "Pre-image resistant - impossible to forge data with same hash",
+					"why_it_matters": "Single bit-flip in firmware is detected and rejected",
+				},
+				"replay_defense": {
+					"title": "Replay Attack Prevention",
+					"category": "Protocol Security",
+					"description": "Uses nonce/timestamp to ensure each OTA can only be used once",
+					"purpose": "Prevents attackers from replaying old OTA updates",
+					"security_property": "Ensures freshness of authentication material",
+					"why_it_matters": "Attackers can't use captured network traffic twice",
+				},
+				"version_monotonicity": {
+					"title": "Rollback Prevention",
+					"category": "Software Security",
+					"description": "Firmware version must always increase, never decrease",
+					"purpose": "Blocks downgrade attacks to vulnerable firmware versions",
+					"security_property": "Version ordering is strictly enforced and logged",
+					"why_it_matters": "Even if old firmware has known CVEs, attacker can't downgrade to it",
+				},
+				"vehicle_state_gating": {
+					"title": "Vehicle Safety Gating",
+					"category": "Safety-Critical Systems",
+					"description": "OTA only accepted when vehicle is safe (not moving, not charging, cool)",
+					"purpose": "Prevents firmware corruption due to power loss during update",
+					"security_property": "Ensures reliable update process with redundant power sources",
+					"why_it_matters": "Update failures on highway could cause catastrophic loss of control",
+				},
+				"multi_layer_verification": {
+					"title": "Defense-in-Depth",
+					"category": "Security Architecture",
+					"description": "Multiple independent checks must all pass for update acceptance",
+					"purpose": "If one defense is bypassed, others remain effective",
+					"security_property": "Fail-safe design - rejection is default, acceptance requires all checks",
+					"why_it_matters": "No single vulnerability can compromise the entire system",
+				},
+			},
+			"threat_model": {
+				"entry_points": [
+					"Wireless network interfaces (LTE, 5G, WiFi)",
+					"Charging station data lines (DC/AC chargers)",
+					"OBD-II diagnostic port",
+					"V2V/V2X communication",
+				],
+				"attack_scenarios": [
+					{
+						"name": "Network Eavesdropping",
+						"attack": "Attacker intercepts OTA update in transit",
+						"defense": "Kyber KEM + encryption prevents plaintext access",
+					},
+					{
+						"name": "Code Injection",
+						"attack": "Attacker substitutes malicious firmware",
+						"defense": "Dilithium signature proves firmware origin",
+					},
+					{
+						"name": "Bit Flip Corruption",
+						"attack": "Attacker flips single bit in firmware (radio interference)",
+						"defense": "SHA3-256 integrity check detects any modification",
+					},
+					{
+						"name": "Downgrade Attack",
+						"attack": "Attacker forces installation of older firmware with known CVEs",
+						"defense": "Version monotonicity check blocks all downgrades",
+					},
+					{
+						"name": "Replay Attack",
+						"attack": "Attacker captures and repeats old valid OTA update",
+						"defense": "Nonce-based replay protection prevents reuse",
+					},
+					{
+						"name": "Juice-Jacking at Charger",
+						"attack": "Rogue charger tries to push malicious firmware during charging",
+						"defense": "Vehicle state gating + charger authentication prevents exploit",
+					},
+				],
+			},
+		}), 200
+
+	@app.get("/api/run-scenario")
+	def api_get_run_scenario() -> tuple[dict, int]:
+		"""GET endpoint info for running scenarios."""
+		return jsonify({
+			"message": "Use POST /api/run-scenario to execute a scenario",
+			"example_payload": {
+				"scenario_name": "Legitimate OTA",
+				"vehicle_state": {
+					"speed_kph": 0,
+					"battery_soc": 68,
+					"temperature_c": 31,
+					"data_link_locked": True,
+					"charging_active": True,
+				},
+				"threat_injection": "bit-flip"
+			}
+		}), 200
 
 	@app.get("/api/docs")
 	def docs_json() -> tuple[dict, int]:

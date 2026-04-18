@@ -185,10 +185,79 @@ async function runScenario(scenarioName) {
       document.querySelector('#auditTimeline').innerHTML = renderAuditTimeline(result.audit_log);
     }
 
+    // Display chain-of-thought logs
+    if (result.chain_of_thought) {
+      renderChainOfThought(result.chain_of_thought, result.scenario_logs);
+    }
+
   } catch (error) {
     console.error('Error running scenario:', error);
     alert(`Error running scenario: ${error.message}`);
   }
+}
+
+function renderChainOfThought(chainText, logs) {
+  const logsDiv = document.querySelector('#chainLogs');
+  const explainerDiv = document.querySelector('#cryptoExplainer');
+  
+  if (!logs || logs.length === 0) {
+    logsDiv.innerHTML = '<div class="chain-logs empty">No logs available</div>';
+    return;
+  }
+
+  // Render detailed logs
+  let logsHtml = '';
+  logs.forEach(log => {
+    const stage = log.stage.toLowerCase();
+    logsHtml += `
+      <div class="log-entry ${stage}">
+        <div class="log-timestamp">${log.elapsed_ms.toFixed(2)}ms</div>
+        <div class="log-stage">${log.stage}</div>
+        <div class="log-message">${log.message}</div>
+      </div>
+    `;
+  });
+  logsDiv.innerHTML = logsHtml;
+
+  // Render crypto principles explanation
+  const cryptoPrinciples = {
+    'kyber_kem': {
+      title: 'Kyber Key Encapsulation (Post-Quantum Safe)',
+      desc: 'Establishes quantum-resistant shared secret using lattice-based cryptography. Kyber is NIST-standardized and protects against both classical and quantum attacks.'
+    },
+    'dilithium_signature': {
+      title: 'Dilithium Digital Signature (Post-Quantum Safe)',
+      desc: 'Verifies firmware origin and integrity using lattice-based signatures. Prevents code injection and man-in-the-middle attacks.'
+    },
+    'sha3_hash': {
+      title: 'SHA3-256 Integrity Check (Quantum-Resistant)',
+      desc: 'Provides cryptographic proof that firmware hasn\'t been tampered with. Detects bit-flip attacks and data corruption.'
+    },
+    'replay_defense': {
+      title: 'Replay Attack Prevention (Nonce-Based)',
+      desc: 'Ensures OTA updates can\'t be repeated. Each update has a unique identifier that\'s recorded and checked.'
+    },
+    'version_monotonicity': {
+      title: 'Rollback Prevention (Version Checking)',
+      desc: 'Blocks attempts to install older firmware versions. Prevents attackers from exploiting known vulnerabilities.'
+    },
+    'vehicle_state_gating': {
+      title: 'Vehicle Safety Gating (Context-Aware)',
+      desc: 'Blocks OTA updates when vehicle is moving, charging, or in thermal stress. Prevents update failures and data corruption.'
+    }
+  };
+
+  let explainerHtml = '<h3>🔐 Cryptographic Principles Used</h3>';
+  Object.values(cryptoPrinciples).forEach(principle => {
+    explainerHtml += `
+      <div class="crypto-principle">
+        <div class="principle-title">${principle.title}</div>
+        <div class="principle-desc">${principle.desc}</div>
+      </div>
+    `;
+  });
+  
+  explainerDiv.innerHTML = explainerHtml;
 }
 
 async function refreshDashboard() {
@@ -251,11 +320,23 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.scenario-btn').forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
-      runScenario(btn.dataset.scenario).catch((error) => {
+    });
+  });
+
+  // Simulate button handler
+  const simulateBtn = document.querySelector('#simulateBtn');
+  if (simulateBtn) {
+    simulateBtn.addEventListener('click', () => {
+      const activeScenario = document.querySelector('.scenario-btn.active');
+      if (!activeScenario) {
+        alert('Please select a scenario first');
+        return;
+      }
+      runScenario(activeScenario.dataset.scenario).catch((error) => {
         console.error('Scenario execution error:', error);
       });
     });
-  });
+  }
 
   // Threat injection button handlers
   document.querySelectorAll('.threat-btn').forEach((btn) => {

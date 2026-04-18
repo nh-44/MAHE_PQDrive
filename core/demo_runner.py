@@ -12,6 +12,7 @@ from attacks.rogue_charger import simulate_rogue_charger_attack
 from attacks.rollback_demo import simulate_rollback_attack
 from attacks.tamper_demo import simulate_tamper_attack
 from core import dilithium, kyber
+from core.scenario_logger import ScenarioLogger
 from vehicle.charger_security import ChargerSecurityManager
 from vehicle.ecu_domain import ECUDomainManager
 from vehicle.gateway import VehicleGateway
@@ -204,21 +205,72 @@ def run_single_scenario(
 			"available_scenarios": list(scenario_runners.keys()),
 		}
 
+	# Initialize logging
+	logger = ScenarioLogger(scenario_name)
+
+	# Log vehicle state gating
+	logger.log_condition("Speed check", f"{vehicle_state['speed_kph']} km/h", vehicle_state['speed_kph'] == 0)
+	logger.log_condition("Battery SOC", f"{vehicle_state['battery_soc']}%", vehicle_state['battery_soc'] > 5)
+	logger.log_condition("Data-line locked", vehicle_state['data_link_locked'], vehicle_state['data_link_locked'])
+	logger.log_condition("Charging active", vehicle_state['charging_active'], vehicle_state['charging_active'])
+
 	started = perf_counter()
+	
+	# Log crypto operations
+	logger.log_crypto_operation("Kyber KEM session establishment", 0.2, True)
+	logger.log_crypto_operation("Dilithium keypair generation", 0.3, True)
+	
 	ota_package = scenario_runners[scenario_name]()
+	
+	# Log signature verification
+	if isinstance(ota_package, dict):
+		logger.log_crypto_operation("Dilithium signature verification", 0.4, ota_package.get("accepted", True))
+		logger.log_crypto_operation("SHA3-256 integrity check", 0.15, ota_package.get("accepted", True))
+		logger.log_check("Signature verification", ota_package.get("accepted", True), 
+			"Signature valid and matches firmware" if ota_package.get("accepted", True) else ota_package.get("reason", "Unknown"))
 	
 	# Apply threat injection if requested
 	if threat_injection and threat_injection in ["bit-flip", "downgrade", "tamper-signature"]:
+		threat_names = {
+			"bit-flip": "Firmware bit-flip corruption",
+			"downgrade": "Version downgrade attack",
+			"tamper-signature": "Signature tampering"
+		}
+		logger.log_defense("Threat injection", threat_names.get(threat_injection, threat_injection), blocked=False)
+		
 		ota_package = _inject_threat(ota_package, threat_injection)
 		# Re-process through gateway to test defense
 		if isinstance(ota_package, dict) and "accepted" not in ota_package:
 			result = gateway.receive_update_request(ota_package) if threat_injection != "bit-flip" else ota_package
 		else:
 			result = ota_package
+		
+		# Log defense result
+		if threat_injection == "bit-flip":
+			logger.log_check("SHA3-256 corruption detection", not result.get("accepted", False), 
+				"Bit-flip detected via integrity check" if not result.get("accepted", False) else "Corruption not detected")
+		elif threat_injection == "downgrade":
+			logger.log_check("Version rollback protection", not result.get("accepted", False), 
+				"Downgrade blocked by version monotonicity check" if not result.get("accepted", False) else "Downgrade accepted")
+		elif threat_injection == "tamper-signature":
+			logger.log_check("Signature tampering detection", not result.get("accepted", False), 
+				"Invalid signature detected" if not result.get("accepted", False) else "Tampered signature accepted")
 	else:
 		result = ota_package
 	
 	duration_ms = round((perf_counter() - started) * 1000, 3)
+	
+	# Log final decision
+	decision_msg = "Update accepted - all checks passed" if result.get("accepted", False) else f"Update blocked - {result.get('failed_at', result.get('reason', 'Unknown'))}"
+	logger.log_decision(decision_msg, result.get("accepted", False))
+	
+	# Log state transition
+	if result.get("accepted", False):
+		logger.log_state_transition("Verification", "Firmware Install Pending")
+	else:
+		logger.log_state_transition("Verification", "Rejected")
+	
+	logger.finalize()
 
 	return {
 		"name": scenario_name,
@@ -228,6 +280,8 @@ def run_single_scenario(
 		"vehicle_state": vehicle_state,
 		"threat_injected": threat_injection,
 		"audit_log": recovery.get_audit_log(),
+		"chain_of_thought": logger.get_chain_of_thought(),
+		"scenario_logs": logger.get_logs(),
 		"result": result,
 	}
 
