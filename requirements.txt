@@ -1,4 +1,4 @@
-oqs
+liboqs-python
 flask
 flask-socketio
 pyzmq

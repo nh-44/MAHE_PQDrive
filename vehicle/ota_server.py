@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+from uuid import uuid4
+
 from core import dilithium, kyber, sha3_hash
 
 
@@ -18,11 +21,19 @@ class OTAServer:
 		self.server_public_key = server_public_key
 		self.vehicle_public_key = vehicle_public_key
 
-	def prepare_update(self, payload: bytes, current_version: str, new_version: str) -> dict:
+	def prepare_update(
+		self,
+		payload: bytes,
+		current_version: str,
+		new_version: str,
+		target_ecu: str = "maps_ecu",
+	) -> dict:
 		"""Prepare a full OTA package for vehicle gateway validation."""
 		ciphertext, session_key = kyber.encapsulate(self.vehicle_public_key)
 		signature = dilithium.sign(self.server_private_key, payload)
 		package_hash = sha3_hash.hash_package(payload)
+		issued_at = datetime.now(timezone.utc)
+		request_id = uuid4().hex
 
 		return {
 			"ciphertext": ciphertext,
@@ -32,5 +43,9 @@ class OTAServer:
 			"package_hash": package_hash,
 			"incoming_version": new_version,
 			"current_version": current_version,
+			"target_ecu": target_ecu,
+			"request_id": request_id,
+			"issued_at": issued_at.isoformat(),
+			"expires_at": (issued_at + timedelta(minutes=10)).isoformat(),
 			"source": "legitimate_ota_server",
 		}

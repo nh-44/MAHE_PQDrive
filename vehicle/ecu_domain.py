@@ -23,6 +23,7 @@ class ECUDomainManager:
 			self.policy = yaml.safe_load(f) or {}
 
 		self.ecus = self.policy.get("ecus", {})
+		self.charging_policy = self.policy.get("charging_policy", {})
 
 	def get_domain(self, ecu_name: str) -> str:
 		"""Return the configured ECU domain, defaulting to infotainment."""
@@ -35,3 +36,13 @@ class ECUDomainManager:
 	def requires_dual_auth(self, ecu_name: str) -> bool:
 		"""Return True for safety-critical ECU dual-authorization policy."""
 		return bool(self.ecus.get(ecu_name, {}).get("requires_dual_auth", False))
+
+	def requires_authenticated_charger(self, ecu_name: str) -> bool:
+		"""Return True when a charger-mediated update needs a verified charger."""
+		return self.get_domain(ecu_name) == SAFETY_CRITICAL
+
+	def allow_updates_while_charging(self, ecu_name: str) -> bool:
+		"""Return True when charging-state updates are allowed for the ECU."""
+		if self.get_domain(ecu_name) == SAFETY_CRITICAL:
+			return bool(self.charging_policy.get("allow_safety_critical_updates_while_charging", False))
+		return bool(self.charging_policy.get("allow_infotainment_updates_while_charging", True))

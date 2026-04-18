@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PQDrive Security Dashboard</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">PQDrive</p>
+        <h1>OTA trust, charger safety, and anti-juice defense in one workflow.</h1>
+        <p class="lede">This dashboard visualizes the verified OTA pipeline, charger-authenticated safety path, replay rejection, and recovery posture for the EV edge.</p>
+      </div>
+      <div class="hero-actions">
+        <button id="refreshBtn">Refresh demo</button>
+        <a href="#scenarios">View scenarios</a>
+      </div>
+    </section>
+
+    <section class="stats" id="stats"></section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Threat model</h2>
+        <span>Entry points, attack paths, and targets</span>
+      </div>
+      <div id="threatModel" class="grid"></div>
+    </section>
+
+    <section class="panel" id="scenarios">
+      <div class="panel-head">
+        <h2>Scenario results</h2>
+        <span>Before / after security outcomes</span>
+      </div>
+      <div id="scenarioList" class="scenario-list"></div>
+    </section>
+
+    <section class="panel split">
+      <div>
+        <div class="panel-head">
+          <h2>Performance</h2>
+          <span>Mean latency and accept/block rate</span>
+        </div>
+        <div id="metrics"></div>
+      </div>
+      <div>
+        <div class="panel-head">
+          <h2>Recommendations</h2>
+          <span>Deployment hardening next steps</span>
+        </div>
+        <ul id="recommendations" class="recommendations"></ul>
+      </div>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='main.js') }}"></script>
+</body>
+</html>
