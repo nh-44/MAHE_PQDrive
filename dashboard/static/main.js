@@ -273,6 +273,17 @@ async function refreshDashboard() {
   document.querySelector('#scenarioList').innerHTML = renderScenarios(report.scenarios);
   document.querySelector('#metrics').innerHTML = renderMetrics(report.metrics);
   document.querySelector('#recommendations').innerHTML = report.recommendations.map((item) => `<li>${item}</li>`).join('');
+  
+  // Fetch and render audit log
+  try {
+    const auditResponse = await fetch('/api/audit-log');
+    if (auditResponse.ok) {
+      const auditLog = await auditResponse.json();
+      document.querySelector('#auditTimeline').innerHTML = renderAuditTimeline(auditLog);
+    }
+  } catch (error) {
+    console.error('Error loading audit log:', error);
+  }
 }
 
 document.addEventListener('DOMContentLoaded', () => {

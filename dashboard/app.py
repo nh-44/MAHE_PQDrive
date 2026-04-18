@@ -5,6 +5,7 @@ from __future__ import annotations
 from flask import Flask, jsonify, render_template, request
 
 from core.demo_runner import build_demo_report, run_single_scenario, get_vehicle_state_presets
+from vehicle.recovery import RecoveryManager
 
 
 # OpenAPI specification for API documentation
@@ -100,6 +101,9 @@ OPENAPI_SPEC = {
 def create_app() -> Flask:
 	app = Flask(__name__, template_folder="templates", static_folder="static")
 	app.config["JSON_SORT_KEYS"] = False
+	
+	# Initialize global recovery manager for audit logging
+	app.recovery_manager = RecoveryManager()
 
 	@app.get("/")
 	def index() -> str:
@@ -123,12 +127,30 @@ def create_app() -> Flask:
 		threat_injection = data.get("threat_injection")
 
 		result = run_single_scenario(scenario_name, vehicle_state, threat_injection)
+		
+		# Log scenario execution to audit log
+		app.recovery_manager.log_event(
+			"scenario_executed",
+			{
+				"scenario_name": scenario_name,
+				"accepted": result.get("accepted", False),
+				"failed_at": result.get("failed_at"),
+				"threat_injection": threat_injection,
+				"duration_ms": result.get("duration_ms", 0),
+			}
+		)
+		
 		return jsonify(result), 200
 
 	@app.get("/api/presets")
 	def presets() -> tuple[dict, int]:
 		"""Return vehicle state presets for the dashboard."""
 		return jsonify(get_vehicle_state_presets()), 200
+
+	@app.get("/api/audit-log")
+	def audit_log() -> tuple[list, int]:
+		"""Return security audit log events from the recovery manager."""
+		return jsonify(app.recovery_manager.get_audit_log()), 200
 
 	@app.get("/api/education")
 	def education() -> tuple[dict, int]:
