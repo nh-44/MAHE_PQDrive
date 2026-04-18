@@ -1,3 +1,72 @@
+/* ===== Notification System ===== */
+class NotificationManager {
+  constructor() {
+    this.container = document.querySelector('#notificationContainer');
+  }
+
+  show(type, title, message, duration = 5000) {
+    const notification = document.createElement('div');
+    notification.className = `notification ${type}`;
+    
+    const icon = this.getIcon(type);
+    notification.innerHTML = `
+      <div class="notification-icon">${icon}</div>
+      <div class="notification-content">
+        <div class="notification-title">${title}</div>
+        <div class="notification-message">${message}</div>
+      </div>
+      <button class="notification-close">✕</button>
+    `;
+    
+    this.container.appendChild(notification);
+    
+    // Close button handler
+    notification.querySelector('.notification-close').addEventListener('click', () => {
+      this.remove(notification);
+    });
+    
+    // Auto-remove after duration
+    if (duration > 0) {
+      setTimeout(() => this.remove(notification), duration);
+    }
+  }
+
+  getIcon(type) {
+    const icons = {
+      threat: '⚠️',
+      success: '✓',
+      warning: '⚡',
+      info: 'ℹ️'
+    };
+    return icons[type] || '●';
+  }
+
+  remove(notification) {
+    notification.classList.add('removing');
+    setTimeout(() => notification.remove(), 300);
+  }
+
+  threat(title, message) {
+    this.show('threat', title, message, 6000);
+  }
+
+  success(title, message) {
+    this.show('success', title, message, 4000);
+  }
+
+  warning(title, message) {
+    this.show('warning', title, message, 5000);
+  }
+
+  info(title, message) {
+    this.show('info', title, message, 3000);
+  }
+}
+
+// Initialize notification manager
+const notifications = new NotificationManager();
+
+/* ===== API Functions ===== */
 async function loadReport() {
   const response = await fetch('/api/report');
   if (!response.ok) {
@@ -152,6 +221,53 @@ async function runScenario(scenarioName) {
     }
 
     const result = await response.json();
+    
+    // Show notifications based on result
+    if (threatInjection && threatInjection !== 'clear') {
+      // Threat was injected
+      const threatMap = {
+        'bit-flip': 'Bit-Flip Attack',
+        'downgrade': 'Version Downgrade Attack',
+        'tamper-signature': 'Signature Tampering Attack'
+      };
+      const threatName = threatMap[threatInjection] || threatInjection;
+      
+      if (!result.accepted) {
+        // Threat was detected and blocked
+        notifications.threat(
+          `🛡️ THREAT BLOCKED: ${threatName}`,
+          `The ${threatName} was detected and successfully blocked. Vehicle remains secure.`
+        );
+      } else {
+        // Threat was NOT detected (system failed to block)
+        notifications.warning(
+          `⚠️ THREAT UNDETECTED: ${threatName}`,
+          `WARNING: A ${threatName} was injected but NOT detected! System security compromised.`
+        );
+      }
+    } else if (!result.accepted) {
+      // Attack scenario detected
+      const reasonMap = {
+        'anti_juice': 'Anti-Juice Jacking',
+        'replay': 'Replay Attack',
+        'tamper_signature': 'Signature Tampering',
+        'rollback': 'Rollback Attack',
+        'version': 'Version Rollback',
+        'dilithium': 'Invalid Signature'
+      };
+      const reason = reasonMap[result.failed_at] || result.failed_at || 'Security Threat';
+      
+      notifications.threat(
+        `🛡️ ATTACK DETECTED: ${reason}`,
+        `Attack scenario blocked at: ${result.failed_at || 'verification'}. Vehicle protected.`
+      );
+    } else {
+      // Legitimate update accepted
+      notifications.success(
+        '✓ UPDATE ACCEPTED',
+        `${scenarioName} passed all security checks. Firmware is authentic and safe.`
+      );
+    }
     
     // Display result
     const resultDiv = document.querySelector('#runResult');
