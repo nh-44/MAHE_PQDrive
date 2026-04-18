@@ -372,6 +372,37 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // Setup collapsible sections
+  function setupCollapsibles() {
+    const threatModelHeader = document.querySelector('#threatModelHeader');
+    const scenarioHeader = document.querySelector('#scenarioHeader');
+    
+    if (threatModelHeader) {
+      threatModelHeader.addEventListener('click', () => {
+        threatModelHeader.classList.toggle('active');
+        const content = threatModelHeader.nextElementSibling;
+        if (content) {
+          content.classList.toggle('visible');
+          content.classList.toggle('hidden');
+        }
+      });
+    }
+    
+    if (scenarioHeader) {
+      scenarioHeader.addEventListener('click', () => {
+        scenarioHeader.classList.toggle('active');
+        const content = scenarioHeader.nextElementSibling;
+        if (content) {
+          content.classList.toggle('visible');
+          content.classList.toggle('hidden');
+        }
+      });
+    }
+  }
+  
+  // Initialize collapsibles
+  setupCollapsibles();
+
   refreshDashboard().catch((error) => {
     console.error(error);
     document.body.insertAdjacentHTML('beforeend', '<div class="error-banner">Dashboard unavailable.</div>');

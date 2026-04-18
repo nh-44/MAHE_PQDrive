@@ -122,17 +122,25 @@
     </section>
 
     <section class="panel">
-        <span>Entry points, attack paths, and targets</span>
+      <div class="panel-head collapsible-header" id="threatModelHeader">
+        <div class="header-title">
+          <span class="toggle-icon">▶</span>
+          <h2>Entry points, attack paths, and targets</h2>
+        </div>
+        <span>Click to expand threat model</span>
       </div>
-      <div id="threatModel" class="grid"></div>
+      <div id="threatModel" class="grid collapsible-content hidden"></div>
     </section>
 
     <section class="panel" id="scenarios">
-      <div class="panel-head">
-        <h2>Scenario results</h2>
-        <span>Before / after security outcomes</span>
+      <div class="panel-head collapsible-header" id="scenarioHeader">
+        <div class="header-title">
+          <span class="toggle-icon">▶</span>
+          <h2>Scenario results</h2>
+        </div>
+        <span>Click to expand results | Before / after security outcomes</span>
       </div>
-      <div id="scenarioList" class="scenario-list"></div>
+      <div id="scenarioList" class="scenario-list collapsible-content hidden"></div>
     </section>
 
     <section class="panel split">
