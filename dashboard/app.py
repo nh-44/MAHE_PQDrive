@@ -9,7 +9,7 @@ from flask import Flask, jsonify, render_template, request
 from flask_socketio import SocketIO
 
 from core.demo_runner import build_demo_report, run_single_scenario, get_vehicle_state_presets
-from core.payload_classifier import classify_payload, parse_firmware_payload
+from core.payload_classifier import classify_payload, evaluate_delivery_gate, parse_firmware_payload
 from vehicle.recovery import RecoveryManager
 
 
@@ -311,102 +311,58 @@ def create_app() -> Flask:
 		firmware_version = parsed.get("sw")
 		firmware_ecu_id = parsed.get("ecu_id")
 		target_ecu = classification.get("target_ecu", "maps_ecu")
+		delivery_context = classification.get("delivery_context", {})
+
+		def _trace_ok(trace: list[dict], stage_name: str) -> bool:
+			for entry in trace:
+				if entry.get("stage") == stage_name:
+					return bool(entry.get("ok", False))
+			return False
+
+		delivery_gate = evaluate_delivery_gate(vehicle_state_overrides, classification, app.config.get("ecu_policy", {}))
+		result_obj = {
+			"delivery_gate_ok": delivery_gate.get("ok", False),
+			"freshness_ok": False,
+			"kyber_ok": False,
+			"dilithium_ok": False,
+			"hash_ok": False,
+			"version_ok": False,
+			"ecu_validation_ok": False,
+		}
 
 		if classification.get("scenario") == "invalid_payload":
 			return jsonify({
-				"result": {
-					"vehicle_status_ok": False,
-					"kyber_ok": False,
-					"dilithium_ok": False,
-					"hash_ok": False,
-					"version_ok": False,
-				},
+				"result": result_obj,
 				"all_passed": False,
 				"accepted": False,
 				"failed_at": "payload_parse",
 				"reason": parsed.get("error", "Invalid payload format"),
 				"classification": classification,
+				"delivery_gate": delivery_gate,
 			}), 400
-		
-		# Stage 1: Vehicle Status Check
-		status_ok = True
-		status_reason = ""
-		
-		# Use unified policy from app config (single source of truth)
-		policy = app.config.get("ecu_policy", {})
-		
-		if target_ecu in policy:
-			req = policy[target_ecu]
-			speed = vehicle_state_overrides.get("speed_kph", 0)
-			battery = vehicle_state_overrides.get("battery_soc", 68)
-			charging = vehicle_state_overrides.get("charging_active", False)
-			
-			if speed > req["max_speed"]:
-				status_ok = False
-				status_reason = f"Vehicle moving ({speed} km/h). {target_ecu} updates require speed <= {req['max_speed']}"
-			elif battery < req["min_battery"]:
-				status_ok = False
-				status_reason = f"Battery critical ({battery}%). {target_ecu} needs minimum {req['min_battery']}%"
-			elif charging and not req["charging_ok"]:
-				status_ok = False
-				status_reason = f"{target_ecu} cannot be updated while charging"
-		
-		# Initialize 5-stage result (SECURITY FIX: Default to False, not True)
-		result_obj = {
-			"vehicle_status_ok": status_ok,
-			"kyber_ok": False,           # Changed from True - guilty until proven innocent
-			"dilithium_ok": False,       # Changed from True
-			"hash_ok": False,            # Changed from True
-			"version_ok": False,
-		}
-		
-		# If Stage 1 fails, return immediately
-		if not status_ok:
-			result_obj.update({
-				"kyber_ok": False,
-				"dilithium_ok": False,
-				"hash_ok": False,
-				"version_ok": False,
-			})
+
+		if not delivery_gate.get("ok", False):
 			app.recovery_manager.log_event("ota_rejected", {
-				"reason": "vehicle_status_check",
+				"reason": "delivery_gate_check",
 				"firmware_ecu": firmware_ecu_id,
-				"status_reason": status_reason,
+				"status_reason": delivery_gate.get("reason"),
+				"delivery_context": delivery_context,
 			})
 			return jsonify({
 				"result": result_obj,
 				"all_passed": False,
 				"accepted": False,
-				"failed_at": "vehicle_status",
-				"reason": status_reason,
+				"failed_at": "delivery_gate",
+				"reason": delivery_gate.get("reason"),
 				"firmware_version": firmware_version,
 				"firmware_ecu": firmware_ecu_id,
 				"target_ecu": target_ecu,
 				"classification": classification,
+				"delivery_gate": delivery_gate,
+				"verification_trace": [
+					{"stage": "delivery_gate", "ok": False, "reason": delivery_gate.get("reason")}
+				],
 			}), 200
-
-		if classification.get("execution_mode") == "force_rogue_source":
-			result_obj.update(
-				{
-					"kyber_ok": False,
-					"dilithium_ok": False,
-					"hash_ok": False,
-					"version_ok": False,
-				}
-			)
-			return jsonify(
-				{
-					"result": result_obj,
-					"all_passed": False,
-					"accepted": False,
-					"failed_at": "source",
-					"reason": "Rogue/source-spoofed payload blocked before cryptographic pipeline.",
-					"firmware_version": firmware_version,
-					"firmware_ecu": firmware_ecu_id,
-					"target_ecu": target_ecu,
-					"classification": classification,
-				}
-			), 200
 		
 		# Stage 2-5: CRITICAL FIX - Call real OTA verification pipeline
 		# Don't just approve based on format checks - verify cryptography
@@ -418,27 +374,68 @@ def create_app() -> Flask:
 				baseline_current = profile_meta.get("legit_sw", "2.0.0")
 			else:
 				baseline_current = profile_meta.get("rollback_sw", "1.0.0")
-			update_package = app.ota_server.prepare_update(
-				payload=payload_bytes,
-				current_version=baseline_current,
-				new_version=firmware_version or "1.0.0",
-				target_ecu=target_ecu,
-			)
+			if classification.get("scenario") == "rogue_charger":
+				from core import dilithium as pq_dilithium
 
-			if classification.get("scenario") == "tamper_attack":
-				sig = bytearray.fromhex(update_package["signature"])
-				sig[0] ^= 0xFF
-				update_package["signature"] = sig.hex()
+				attacker_public_key, attacker_private_key = pq_dilithium.generate_keypair()
+				_ = attacker_public_key
+				update_package = app.ota_server.prepare_update(
+					payload=payload_bytes,
+					current_version=baseline_current,
+					new_version=firmware_version or "1.0.0",
+					target_ecu=target_ecu,
+				)
+				update_package["signature"] = pq_dilithium.sign(attacker_private_key, payload_bytes).hex()
+				update_package["source"] = delivery_context.get("source", "charging_network")
+			else:
+				update_package = app.ota_server.prepare_update(
+					payload=payload_bytes,
+					current_version=baseline_current,
+					new_version=firmware_version or "1.0.0",
+					target_ecu=target_ecu,
+				)
+				update_package["source"] = delivery_context.get("source", "legitimate_ota_server")
+
+			update_package["delivery_channel"] = delivery_context.get("delivery_channel")
+			update_package["vehicle_state"] = vehicle_state_overrides
 
 			pipeline_result = app.verification_pipeline.run(update_package)
-			
-			# Update result_obj with actual cryptographic verification results
 			result_obj.update({
+				"freshness_ok": _trace_ok(pipeline_result.get("verification_trace", []), "freshness"),
 				"kyber_ok": pipeline_result.get("kyber_ok", False),
 				"dilithium_ok": pipeline_result.get("dilithium_ok", False),
 				"hash_ok": pipeline_result.get("hash_ok", False),
 				"version_ok": pipeline_result.get("version_ok", False),
 			})
+
+			ecu_validation_ok = bool(target_ecu and app.vehicle_gateway.ecu_manager.is_valid_ecu_target(target_ecu))
+			if ecu_validation_ok:
+				result_obj["ecu_validation_ok"] = True
+			else:
+				result_obj["ecu_validation_ok"] = False
+				verification_trace = list(pipeline_result.get("verification_trace", []))
+				verification_trace.append({"stage": "ecu_validation", "ok": False, "reason": f"Invalid ECU target: {target_ecu}"})
+				app.recovery_manager.log_event("ota_rejected", {
+					"reason": "ecu_validation_failed",
+					"failed_at": "ecu_validation",
+					"firmware_ecu": firmware_ecu_id,
+					"firmware_version": firmware_version,
+				})
+				return jsonify({
+					"result": result_obj,
+					"all_passed": False,
+					"accepted": False,
+					"failed_at": "ecu_validation",
+					"reason": f"Invalid ECU target: {target_ecu}",
+					"firmware_version": firmware_version,
+					"firmware_ecu": firmware_ecu_id,
+					"target_ecu": target_ecu,
+					"classification": classification,
+					"delivery_gate": delivery_gate,
+					"verification_trace": verification_trace,
+				}), 200
+			
+			# Update result_obj with actual cryptographic verification results
 			
 			# If pipeline says "no", we say "no" (fail-safe design)
 			if not pipeline_result.get("all_passed", False):
@@ -458,8 +455,12 @@ def create_app() -> Flask:
 					"firmware_ecu": firmware_ecu_id,
 					"target_ecu": target_ecu,
 					"classification": classification,
+					"delivery_gate": delivery_gate,
 					"verification_trace": pipeline_result.get("verification_trace", []),
 				}), 200
+
+			verification_trace = list(pipeline_result.get("verification_trace", []))
+			verification_trace.append({"stage": "ecu_validation", "ok": True, "reason": f"ECU target {target_ecu} validated"})
 			
 		except Exception as e:
 			# Security: Any verification error means reject (fail-safe)
@@ -478,12 +479,14 @@ def create_app() -> Flask:
 				"firmware_ecu": firmware_ecu_id,
 				"target_ecu": target_ecu,
 				"classification": classification,
+				"delivery_gate": delivery_gate,
 			}), 200
 		
 		# All checks passed - OTA update approved
 		app.recovery_manager.log_event("ota_accepted", {
 			"firmware_ecu": firmware_ecu_id,
 			"firmware_version": firmware_version,
+			"delivery_context": delivery_context,
 		})
 		
 		return jsonify({
@@ -496,7 +499,8 @@ def create_app() -> Flask:
 			"target_ecu": target_ecu,
 			"target_ecu_updated": True,
 			"classification": classification,
-			"verification_trace": pipeline_result.get("verification_trace", []),
+			"delivery_gate": delivery_gate,
+			"verification_trace": verification_trace,
 		}), 200
 
 	@app.get("/api/audit-log")

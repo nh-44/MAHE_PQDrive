@@ -1,4 +1,4 @@
-from core.payload_classifier import classify_payload, parse_firmware_payload
+from core.payload_classifier import classify_payload, evaluate_delivery_gate, parse_firmware_payload
 
 
 def test_parse_payload_extracts_core_fields() -> None:
@@ -53,3 +53,38 @@ def test_classify_marks_chassis_clone_as_medium_confidence() -> None:
 	assert classification["scenario"] == "legitimate_or_metadata_clone"
 	assert classification["confidence"] == "medium"
 	assert "stealth_clone_possible" in classification["iocs"]
+
+
+def test_delivery_gate_rejects_rogue_charger_when_idle() -> None:
+	payload = (
+		"ECU_ID:ADAS-3.2 | HW:REV-C | SW:9.9.9 | BUILD:20240318-a4f2c1 | "
+		"REGION:EU | MODULES:LANE_KEEP_v4,COLLISION_WARN_v3,BLIND_SPOT_v2,SIGN_RECOG_v5 | "
+		"PATCHES:CVE-2024-3821,CVE-2024-4102 | TS:2024-03-18T09:14:22Z"
+	)
+	classification = classify_payload(payload)
+	gate = evaluate_delivery_gate(
+		{"speed_kph": 0, "battery_soc": 68, "charging_active": False, "data_link_locked": True},
+		classification,
+		{"adas_ecu": {"max_speed": 0, "min_battery": 20, "charging_ok": True}},
+	)
+
+	assert gate["ok"] is False
+	assert gate["failed_at"] == "delivery_gate"
+	assert gate["source"] == "charging_network"
+
+
+def test_delivery_gate_allows_rogue_charger_when_charging() -> None:
+	payload = (
+		"ECU_ID:ADAS-3.2 | HW:REV-C | SW:9.9.9 | BUILD:20240318-a4f2c1 | "
+		"REGION:EU | MODULES:LANE_KEEP_v4,COLLISION_WARN_v3,BLIND_SPOT_v2,SIGN_RECOG_v5 | "
+		"PATCHES:CVE-2024-3821,CVE-2024-4102 | TS:2024-03-18T09:14:22Z"
+	)
+	classification = classify_payload(payload)
+	gate = evaluate_delivery_gate(
+		{"speed_kph": 0, "battery_soc": 68, "charging_active": True, "data_link_locked": True},
+		classification,
+		{"adas_ecu": {"max_speed": 0, "min_battery": 20, "charging_ok": True}},
+	)
+
+	assert gate["ok"] is True
+	assert gate["source_matches_state"] is True

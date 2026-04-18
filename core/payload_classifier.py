@@ -22,6 +22,21 @@ class ECUProfile:
 	target_ecu: str
 
 
+@dataclass(frozen=True)
+class DeliveryContext:
+	"""How the payload is expected to reach the vehicle."""
+
+	source: str
+	delivery_channel: str
+	requires_charging_state: bool
+
+
+LEGITIMATE_SOURCE = "legitimate_ota_server"
+ROGUE_SOURCE = "charging_network"
+WIRELESS_CHANNEL = "wireless_telematics"
+CHARGER_CHANNEL = "charger_interface"
+
+
 ECU_PROFILES: dict[str, ECUProfile] = {
 	"ADAS-3.2": ECUProfile(
 		ecu_id="ADAS-3.2",
@@ -179,6 +194,11 @@ def classify_payload(payload_text: str) -> dict[str, Any]:
 	confidence = "high"
 	scenario = "legitimate_ota"
 	execution_mode = "normal"
+	delivery_context = DeliveryContext(
+		source=LEGITIMATE_SOURCE,
+		delivery_channel=WIRELESS_CHANNEL,
+		requires_charging_state=False,
+	)
 
 	if parsed.get("hw") and parsed["hw"] != profile.hardware_rev:
 		iocs.append("hardware_revision_mismatch")
@@ -189,6 +209,11 @@ def classify_payload(payload_text: str) -> dict[str, Any]:
 	if sw == profile.rogue_sw and sw == "9.9.9":
 		scenario = "rogue_charger"
 		execution_mode = "force_rogue_source"
+		delivery_context = DeliveryContext(
+			source=ROGUE_SOURCE,
+			delivery_channel=CHARGER_CHANNEL,
+			requires_charging_state=True,
+		)
 		iocs.append("sentinel_sw_9_9_9")
 		reasoning.append(
 			"SW version jumped to sentinel 9.9.9, a known spoof/injection indicator."
@@ -200,6 +225,11 @@ def classify_payload(payload_text: str) -> dict[str, Any]:
 	elif _as_version_tuple(sw) < _as_version_tuple(profile.legit_sw):
 		scenario = "rollback_attack"
 		execution_mode = "version_guard"
+		delivery_context = DeliveryContext(
+			source=LEGITIMATE_SOURCE,
+			delivery_channel=WIRELESS_CHANNEL,
+			requires_charging_state=False,
+		)
 		iocs.append("version_regression")
 		reasoning.append(
 			f"Incoming SW {sw} is below deployed baseline {profile.legit_sw}; rollback detected."
@@ -211,6 +241,11 @@ def classify_payload(payload_text: str) -> dict[str, Any]:
 	elif sw == profile.legit_sw:
 		scenario = "legitimate_or_metadata_clone"
 		execution_mode = "normal"
+		delivery_context = DeliveryContext(
+			source=LEGITIMATE_SOURCE,
+			delivery_channel=WIRELESS_CHANNEL,
+			requires_charging_state=False,
+		)
 		reasoning.append(
 			"SW matches baseline release version. Metadata alone cannot prove authenticity."
 		)
@@ -225,6 +260,11 @@ def classify_payload(payload_text: str) -> dict[str, Any]:
 		scenario = "version_anomaly"
 		execution_mode = "normal"
 		confidence = "medium"
+		delivery_context = DeliveryContext(
+			source=LEGITIMATE_SOURCE,
+			delivery_channel=WIRELESS_CHANNEL,
+			requires_charging_state=False,
+		)
 		iocs.append("unexpected_version_pattern")
 		reasoning.append(
 			f"SW {sw} is neither baseline {profile.legit_sw} nor rollback {profile.rollback_sw}; manual review required."
@@ -248,6 +288,11 @@ def classify_payload(payload_text: str) -> dict[str, Any]:
 			"rollback_sw": profile.rollback_sw,
 			"risk": profile.risk,
 		},
+		"delivery_context": {
+			"source": delivery_context.source,
+			"delivery_channel": delivery_context.delivery_channel,
+			"requires_charging_state": delivery_context.requires_charging_state,
+		},
 		"scenario": scenario,
 		"confidence": confidence,
 		"risk": profile.risk,
@@ -255,4 +300,97 @@ def classify_payload(payload_text: str) -> dict[str, Any]:
 		"iocs": iocs,
 		"target_ecu": profile.target_ecu,
 		"execution_mode": execution_mode,
+	}
+
+
+def evaluate_delivery_gate(vehicle_state: dict[str, Any], classification: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
+	"""Evaluate the compound state/source gate before cryptographic verification."""
+	parsed = classification.get("parsed", {})
+	target_ecu = classification.get("target_ecu") or parsed.get("ecu_id") or "maps_ecu"
+	req = policy.get(target_ecu, {})
+	delivery_context = classification.get("delivery_context", {})
+	source = delivery_context.get("source", LEGITIMATE_SOURCE)
+	delivery_channel = delivery_context.get("delivery_channel", WIRELESS_CHANNEL)
+	requires_charging_state = bool(delivery_context.get("requires_charging_state", False))
+
+	speed = int(vehicle_state.get("speed_kph", 0) or 0)
+	battery = int(vehicle_state.get("battery_soc", 0) or 0)
+	charging = bool(vehicle_state.get("charging_active", False))
+	data_link_locked = bool(vehicle_state.get("data_link_locked", True))
+
+	state_ok = True
+	state_reasons: list[str] = []
+
+	max_speed = int(req.get("max_speed", 150) or 150)
+	min_battery = int(req.get("min_battery", 0) or 0)
+	charging_ok = bool(req.get("charging_ok", True))
+
+	if speed > max_speed:
+		state_ok = False
+		state_reasons.append(f"speed {speed} exceeds max {max_speed}")
+	if battery < min_battery:
+		state_ok = False
+		state_reasons.append(f"battery {battery}% below min {min_battery}%")
+	if charging and not charging_ok:
+		state_ok = False
+		state_reasons.append("charging state not permitted for this ECU")
+	if not data_link_locked:
+		state_ok = False
+		state_reasons.append("data link is unlocked")
+
+	source_ok = source in {LEGITIMATE_SOURCE, ROGUE_SOURCE}
+	source_matches_state = True
+	source_reason = ""
+	if delivery_channel == CHARGER_CHANNEL:
+		source_matches_state = charging
+		if not charging:
+			source_reason = "charger interface is only valid while charging"
+		elif source != ROGUE_SOURCE:
+			source_ok = False
+			source_reason = "charger delivery must be associated with charging_network source"
+	elif delivery_channel == WIRELESS_CHANNEL:
+		source_matches_state = True
+		if source != LEGITIMATE_SOURCE:
+			source_ok = False
+			source_reason = "wireless delivery must be sourced from legitimate_ota_server"
+	else:
+		source_ok = False
+		source_matches_state = False
+		source_reason = f"unknown delivery channel: {delivery_channel}"
+
+	if requires_charging_state and not charging:
+		source_matches_state = False
+		if not source_reason:
+			source_reason = "scenario requires charging state"
+
+	ok = state_ok and source_ok and source_matches_state
+	reasons = []
+	if not state_ok:
+		reasons.append("state gate failed: " + "; ".join(state_reasons))
+	if not source_ok:
+		reasons.append("source gate failed: " + (source_reason or f"source {source} not allowed"))
+	if state_ok and source_ok and not source_matches_state:
+		reasons.append(source_reason or "source does not match current vehicle state")
+
+	return {
+		"ok": ok,
+		"failed_at": None if ok else "delivery_gate",
+		"reason": "Compound delivery gate passed" if ok else "; ".join(reasons) or "delivery gate rejected the payload",
+		"state_ok": state_ok,
+		"source_ok": source_ok,
+		"source_matches_state": source_matches_state,
+		"source": source,
+		"delivery_channel": delivery_channel,
+		"target_ecu": target_ecu,
+		"vehicle_state": {
+			"speed_kph": speed,
+			"battery_soc": battery,
+			"charging_active": charging,
+			"data_link_locked": data_link_locked,
+		},
+		"policy": {
+			"max_speed": max_speed,
+			"min_battery": min_battery,
+			"charging_ok": charging_ok,
+		},
 	}

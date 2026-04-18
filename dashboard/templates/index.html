@@ -167,10 +167,15 @@
   <div class="card sb-wrap">
     <div class="sb-tag">7-Stage Verification Pipeline — Fail-fast: any stage failure blocks ECU</div>
     <div class="stages">
-      <div class="stage" id="st-vehicle-status">
-        <div class="sico">🚗</div>
-        <div><div class="sname">Vehicle Status</div><div class="salg">Safe state check</div></div>
-        <div class="sres" id="r-vehicle-status">—</div>
+      <div class="stage" id="st-delivery-gate">
+        <div class="sico">🔌</div>
+        <div><div class="sname">Delivery Gate</div><div class="salg">State + source + channel</div></div>
+        <div class="sres" id="r-delivery-gate">—</div>
+      </div>
+      <div class="stage" id="st-freshness">
+        <div class="sico">⏱</div>
+        <div><div class="sname">Freshness</div><div class="salg">Issued / expires window</div></div>
+        <div class="sres" id="r-freshness">—</div>
       </div>
       <div class="stage" id="st-kyber">
         <div class="sico">🔑</div>
@@ -191,6 +196,11 @@
         <div class="sico">↑</div>
         <div><div class="sname">Version check</div><div class="salg">Anti-rollback</div></div>
         <div class="sres" id="r-version">—</div>
+      </div>
+      <div class="stage" id="st-ecu-validation">
+        <div class="sico">🧭</div>
+        <div><div class="sname">ECU validation</div><div class="salg">Target allowlist</div></div>
+        <div class="sres" id="r-ecu-validation">—</div>
       </div>
     </div>
     <div class="verdict" id="verdict">Awaiting packet</div>
@@ -433,7 +443,7 @@ function resetUI() {
     if(s) s.remove();
   });
   ['c0','c1','c2'].forEach(id => document.getElementById(id).className = 'conn');
-  ['vehicle-status','kyber','dilithium','hash','version'].forEach(s => {
+  ['delivery-gate','freshness','kyber','dilithium','hash','version','ecu-validation'].forEach(s => {
     document.getElementById('st-' + s).className = 'stage';
     document.getElementById('r-' + s).textContent = '—';
   });
@@ -495,9 +505,10 @@ function renderClassification(classification) {
   const risk = (classification.risk || 'UNKNOWN').toUpperCase();
   const iocs = classification.iocs || [];
   const notes = classification.reasoning || [];
+  const delivery = classification.delivery_context || {};
 
   title.textContent = scenario;
-  meta.textContent = `Risk: ${risk} | Confidence: ${confidence}`;
+  meta.textContent = `Risk: ${risk} | Confidence: ${confidence} | Source: ${delivery.source || 'n/a'} | Channel: ${delivery.delivery_channel || 'n/a'}`;
   reasoning.innerHTML = [
     notes.length ? `Reasoning: ${notes.join(' | ')}` : 'Reasoning: n/a',
     iocs.length ? `IoCs: ${iocs.join(', ')}` : 'IoCs: none',
@@ -540,21 +551,35 @@ async function runOTAUpdate() {
     const result = await response.json();
     renderClassification(result.classification);
 
-    // Stage 1: Vehicle Status Check
-    await checkStage('vehicle-status', result.result?.vehicle_status_ok ?? true);
-    if(!result.result?.vehicle_status_ok) {
+    // Stage 1: Delivery gate (state + source + channel)
+    await checkStage('delivery-gate', result.result?.delivery_gate_ok ?? true);
+    if(!result.result?.delivery_gate_ok) {
       setNode('n-tcu', 'fail');
-      log('Vehicle status check failed', 'f');
-      document.getElementById('verdict').textContent = 'BLOCKED: Vehicle not in safe state';
+      log('Delivery gate failed', 'f');
+      document.getElementById('verdict').textContent = 'BLOCKED: Delivery channel rejected';
       document.getElementById('why').className = 'why show';
       document.getElementById('why-body').textContent = result.reason || 'Vehicle conditions not suitable for update';
-      document.getElementById('sys-badge').textContent = 'Blocked (Status)';
+      document.getElementById('sys-badge').textContent = 'Blocked (Gate)';
       running = false;
       document.getElementById('btn-run').disabled = false;
       return;
     }
 
-    // Stage 2: Kyber KEM
+    // Stage 2: Freshness
+    await checkStage('freshness', result.result?.freshness_ok ?? true);
+    if(!result.result?.freshness_ok) {
+      setNode('n-tcu', 'fail');
+      log('Freshness check failed', 'f');
+      document.getElementById('verdict').textContent = 'BLOCKED: Freshness window invalid';
+      document.getElementById('why').className = 'why show';
+      document.getElementById('why-body').textContent = result.reason || 'Timestamp freshness check failed.';
+      document.getElementById('sys-badge').textContent = 'Blocked (Freshness)';
+      running = false;
+      document.getElementById('btn-run').disabled = false;
+      return;
+    }
+
+    // Stage 3: Kyber KEM
     await checkStage('kyber', result.result?.kyber_ok ?? true);
     if(!result.result?.kyber_ok) {
       setNode('n-tcu', 'fail');
@@ -568,7 +593,7 @@ async function runOTAUpdate() {
       return;
     }
 
-    // Stage 3: Dilithium Signature
+    // Stage 4: Dilithium Signature
     await checkStage('dilithium', result.result?.dilithium_ok ?? true);
     if(!result.result?.dilithium_ok) {
       setNode('n-sandbox', 'fail');
@@ -582,7 +607,7 @@ async function runOTAUpdate() {
       return;
     }
 
-    // Stage 4: SHA3-256 Hash
+    // Stage 5: SHA3-256 Hash
     await checkStage('hash', result.result?.hash_ok ?? true);
     if(!result.result?.hash_ok) {
       setNode('n-sandbox', 'fail');
@@ -596,7 +621,7 @@ async function runOTAUpdate() {
       return;
     }
 
-    // Stage 5: Version Check
+    // Stage 6: Version Check
     await checkStage('version', result.result?.version_ok ?? true);
     if(!result.result?.version_ok) {
       setNode('n-gateway', 'fail');
@@ -610,6 +635,20 @@ async function runOTAUpdate() {
       return;
     }
 
+    // Stage 7: ECU validation
+    await checkStage('ecu-validation', result.result?.ecu_validation_ok ?? true);
+    if(!result.result?.ecu_validation_ok) {
+      setNode('n-gateway', 'fail');
+      log('ECU target validation failed', 'f');
+      document.getElementById('verdict').textContent = 'BLOCKED: ECU target not allowlisted';
+      document.getElementById('why').className = 'why show';
+      document.getElementById('why-body').textContent = result.reason || 'Invalid ECU target.';
+      document.getElementById('sys-badge').textContent = 'Blocked (ECU)';
+      running = false;
+      document.getElementById('btn-run').disabled = false;
+      return;
+    }
+
     // All stages passed - update ECUs
     setNode('n-charger', 'pass');
     setNode('n-tcu', 'pass');
@@ -617,7 +656,7 @@ async function runOTAUpdate() {
     setNode('n-gateway', 'pass');
     ['c0','c1','c2'].forEach(id => document.getElementById(id).className = 'conn pass');
     
-    log('All 5 verification stages passed', 's');
+    log('All 7 verification stages passed', 's');
     
     // Update target ECU version if available
     if(result.target_ecu && result.firmware_version) {
@@ -629,10 +668,10 @@ async function runOTAUpdate() {
     document.getElementById('verdict').textContent = 'ACCEPTED: Firmware verified and installed';
     document.getElementById('why').className = 'why show ok';
     document.getElementById('why-word').textContent = 'accepted';
-    document.getElementById('why-body').textContent = 'Firmware passed all 5 gates. Vehicle safe, OEM origin proven, integrity confirmed, version monotonic.';
+    document.getElementById('why-body').textContent = 'Firmware passed all 7 gates. Delivery channel matched the vehicle state, OEM origin proven, freshness confirmed, integrity confirmed, version monotonic, and ECU target validated.';
     document.getElementById('sys-badge').textContent = 'Accepted';
 
-    if(result.result?.verification_trace) {
+    if(result.verification_trace) {
       document.getElementById('crypto-proof').className = 'crypto-proof show';
       document.getElementById('cp-sig').textContent = 'Verified ✓';
       document.getElementById('cp-sk').textContent = 'Established ✓';
