@@ -19,6 +19,76 @@ from vehicle.ota_server import OTAServer
 from vehicle.recovery import RecoveryManager
 
 
+VEHICLE_STATE_PRESETS = {
+	"Parked & Charging": {
+		"charging_active": True,
+		"data_link_locked": True,
+		"battery_soc": 68,
+		"speed_kph": 0,
+		"thermal_state": "normal",
+		"temperature_c": 31,
+	},
+	"Highway": {
+		"charging_active": False,
+		"data_link_locked": True,
+		"battery_soc": 45,
+		"speed_kph": 100,
+		"thermal_state": "normal",
+		"temperature_c": 52,
+	},
+	"Critical Battery": {
+		"charging_active": True,
+		"data_link_locked": True,
+		"battery_soc": 5,
+		"speed_kph": 0,
+		"thermal_state": "critical",
+		"temperature_c": 78,
+	},
+	"Normal Idle": {
+		"charging_active": False,
+		"data_link_locked": True,
+		"battery_soc": 42,
+		"speed_kph": 0,
+		"thermal_state": "normal",
+		"temperature_c": 28,
+	},
+}
+
+
+def _inject_threat(ota_package: dict, threat_type: str) -> dict:
+	"""Inject a specific threat into an OTA package for testing defense mechanisms."""
+	modified = ota_package.copy()
+	
+	if threat_type == "bit-flip":
+		# Flip one bit in the firmware payload
+		payload = modified.get("ciphertext", b"")
+		if isinstance(payload, bytes) and len(payload) > 0:
+			payload_list = bytearray(payload)
+			payload_list[0] ^= 0x01  # Flip least significant bit
+			modified["ciphertext"] = bytes(payload_list)
+		modified["threat_injected"] = "bit-flip"
+		
+	elif threat_type == "downgrade":
+		# Lower the version number
+		if "incoming_version" in modified:
+			parts = modified["incoming_version"].split(".")
+			if len(parts) >= 2:
+				parts[1] = str(max(0, int(parts[1]) - 1))
+				modified["incoming_version"] = ".".join(parts)
+		modified["threat_injected"] = "downgrade"
+		
+	elif threat_type == "tamper-signature":
+		# Corrupt the signature
+		signature = modified.get("signature", "")
+		if signature and len(signature) > 8:
+			sig_list = bytearray.fromhex(signature)
+			sig_list[0] ^= 0xFF  # Flip all bits in first byte
+			modified["signature"] = sig_list.hex()
+		modified["threat_injected"] = "tamper-signature"
+	
+	return modified
+
+
 def _run_scenario(name: str, runner) -> dict:
 	started = perf_counter()
 	result = runner()
@@ -32,8 +102,17 @@ def _run_scenario(name: str, runner) -> dict:
 	}
 
 
-def run_single_scenario(scenario_name: str, vehicle_state_overrides: dict[str, Any] | None = None) -> dict:
-	"""Run a single scenario with optional vehicle state overrides for interactive demo."""
+def get_vehicle_state_presets() -> dict[str, dict]:
+	"""Return available vehicle state presets for the dashboard."""
+	return VEHICLE_STATE_PRESETS
+
+
+def run_single_scenario(
+	scenario_name: str,
+	vehicle_state_overrides: dict[str, Any] | None = None,
+	threat_injection: str | None = None,
+) -> dict:
+	"""Run a single scenario with optional vehicle state overrides and threat injection for interactive demo."""
 	if vehicle_state_overrides is None:
 		vehicle_state_overrides = {}
 
@@ -126,7 +205,19 @@ def run_single_scenario(scenario_name: str, vehicle_state_overrides: dict[str, A
 		}
 
 	started = perf_counter()
-	result = scenario_runners[scenario_name]()
+	ota_package = scenario_runners[scenario_name]()
+	
+	# Apply threat injection if requested
+	if threat_injection and threat_injection in ["bit-flip", "downgrade", "tamper-signature"]:
+		ota_package = _inject_threat(ota_package, threat_injection)
+		# Re-process through gateway to test defense
+		if isinstance(ota_package, dict) and "accepted" not in ota_package:
+			result = gateway.receive_update_request(ota_package) if threat_injection != "bit-flip" else ota_package
+		else:
+			result = ota_package
+	else:
+		result = ota_package
+	
 	duration_ms = round((perf_counter() - started) * 1000, 3)
 
 	return {
@@ -135,6 +226,8 @@ def run_single_scenario(scenario_name: str, vehicle_state_overrides: dict[str, A
 		"accepted": bool(result.get("accepted", False)),
 		"failed_at": result.get("failed_at", result.get("reason")),
 		"vehicle_state": vehicle_state,
+		"threat_injected": threat_injection,
+		"audit_log": recovery.get_audit_log(),
 		"result": result,
 	}
 

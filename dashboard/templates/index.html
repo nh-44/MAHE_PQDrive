@@ -17,6 +17,7 @@
       <div class="hero-actions">
         <button id="refreshBtn">Refresh demo</button>
         <a href="#interactive">Interactive Controls</a>
+        <a href="/api/docs/html" target="_blank">API Docs</a>
       </div>
     </section>
 
@@ -29,6 +30,11 @@
       </div>
       
       <div class="interactive-controls">
+        <div class="control-group">
+          <label>Vehicle State Presets</label>
+          <div id="presetButtons" class="preset-buttons"></div>
+        </div>
+
         <div class="control-group">
           <label>Vehicle State Parameters</label>
           <div class="state-controls">
@@ -70,6 +76,17 @@
           </div>
         </div>
 
+        <div class="control-group">
+          <label>Threat Injection (Optional)</label>
+          <div class="threat-buttons">
+            <button class="threat-btn" data-threat="bit-flip" title="Corrupt firmware payload">Bit Flip</button>
+            <button class="threat-btn" data-threat="downgrade" title="Lower version number">Downgrade</button>
+            <button class="threat-btn" data-threat="tamper-signature" title="Break signature">Tamper Signature</button>
+            <button class="threat-btn clear" data-threat="clear" title="Clear injection">Clear</button>
+          </div>
+          <div id="threatStatus" class="threat-status"></div>
+        </div>
+
         <div id="runResult" class="run-result hidden">
           <div class="result-header">
             <h3 id="resultName"></h3>
@@ -85,7 +102,13 @@
 
     <section class="panel">
       <div class="panel-head">
-        <h2>Threat model</h2>
+        <h2>Audit Log Timeline</h2>
+        <span>Security events and decision points</span>
+      </div>
+      <div id="auditTimeline" class="audit-timeline"></div>
+    </section>
+
+    <section class="panel">
         <span>Entry points, attack paths, and targets</span>
       </div>
       <div id="threatModel" class="grid"></div>
