@@ -1,0 +1,7 @@
+oqs
+flask
+flask-socketio
+pyzmq
+cryptography
+pyyaml
+pytest
