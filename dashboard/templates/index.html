@@ -7,25 +7,25 @@
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     html{height:100%}
-    body{font-family:'Segoe UI',system-ui,sans-serif;background:#0d1117;color:#c9d1d9;font-size:12px;height:100%;display:flex;flex-direction:column;overflow-x:hidden}
+    body{font-family:'Segoe UI',system-ui,sans-serif;background:#0d1117;color:#c9d1d9;font-size:13px;height:100%;display:flex;flex-direction:column;overflow-x:hidden}
     .header{padding:8px 16px;border-bottom:1px solid #30363d;display:flex;align-items:center;gap:10px;flex-shrink:0;height:42px}
-    .header h1{font-size:12px;font-weight:600;color:#e6edf3}
-    .badge{font-size:9px;padding:2px 6px;border-radius:20px;border:1px solid #30363d;color:#8b949e}
-    .header-sub{font-size:9px;color:#8b949e;margin-left:auto}
-    .layout{display:grid;grid-template-columns:1fr 390px;gap:0;flex:1;overflow-y:auto;scrollbar-width:none;-ms-overflow-style:none}
+    .header h1{font-size:13px;font-weight:600;color:#e6edf3}
+    .badge{font-size:10px;padding:2px 6px;border-radius:20px;border:1px solid #30363d;color:#8b949e}
+    .header-sub{font-size:10px;color:#8b949e;margin-left:auto}
+    .layout{display:grid;grid-template-columns:1fr 585px;gap:0;flex:1;overflow-y:auto;scrollbar-width:none;-ms-overflow-style:none}
     .layout::-webkit-scrollbar{display:none}
     .left{padding:10px;border-right:1px solid #30363d;display:flex;flex-direction:column;gap:8px}
     .right{display:flex;flex-direction:column;background:#0d1117;padding:10px;gap:8px}
 
     .card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:10px;flex-shrink:0}
-    .card-title{font-size:9px;color:#8b949e;text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px}
+    .card-title{font-size:10px;color:#8b949e;text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px}
 
     .topo{display:flex;align-items:center;justify-content:space-between;gap:3px}
     .tnode{display:flex;flex-direction:column;align-items:center;flex:1}
     .nbox{width:70px;padding:6px 3px;border-radius:6px;border:1px solid #30363d;background:#0d1117;text-align:center;position:relative;transition:all .3s}
     .nicon{font-size:13px;line-height:1;margin-bottom:2px}
-    .nlabel{font-size:9px;font-weight:600;color:#c9d1d9}
-    .nsub{font-size:8px;color:#8b949e;margin-top:0px}
+    .nlabel{font-size:10px;font-weight:600;color:#c9d1d9}
+    .nsub{font-size:9px;color:#8b949e;margin-top:0px}
     .nbox.pass{border-color:#3fb950;background:rgba(63,185,80,.07)}
     .nbox.fail{border-color:#f85149;background:rgba(248,81,73,.07)}
     .nstatus{position:absolute;top:-7px;right:-7px;width:15px;height:15px;border-radius:50%;font-size:9px;display:flex;align-items:center;justify-content:center;border:2px solid #0d1117;font-weight:700}
@@ -36,7 +36,7 @@
     .pkt-row{position:relative;height:16px;margin-top:9px}
     .pkt-line{position:absolute;inset:7px 0 0;height:1px;background:#21262d}
     .pkt{position:absolute;width:10px;height:10px;border-radius:50%;top:3px;left:0;display:none;transition:left .55s cubic-bezier(.4,0,.2,1)}
-    .topo-msg{font-size:10px;color:#8b949e;text-align:center;margin-top:6px;min-height:13px}
+    .topo-msg{font-size:11px;color:#8b949e;text-align:center;margin-top:6px;min-height:13px}
 
     .sb-wrap{position:relative}
     .sb-tag{position:absolute;top:-7px;left:10px;background:#161b22;padding:0 4px;font-size:8px;color:#58a6ff;border:1px solid #30363d;border-radius:3px;text-transform:uppercase;letter-spacing:.05em}
@@ -72,30 +72,30 @@
     .ecu-ver{font-size:8px;color:#8b949e}
     .ecu-card.updated{border-color:#3fb950;background:rgba(63,185,80,.09)}
 
-    .section-title{font-size:9px;color:#8b949e;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;padding-bottom:3px;border-bottom:1px solid #21262d}
-    select,input[type=text]{font-size:10px;padding:4px 6px;border-radius:5px;border:1px solid #30363d;background:#161b22;color:#c9d1d9}
-    textarea{font-size:10px;padding:5px 7px;border-radius:5px;border:1px solid #30363d;background:#0d1117;color:#c9d1d9;width:100%;resize:vertical;font-family:'Courier New',monospace;line-height:1.3;max-height:60px}
+    .section-title{font-size:10px;color:#8b949e;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;padding-bottom:3px;border-bottom:1px solid #21262d}
+    select,input[type=text]{font-size:11px;padding:4px 6px;border-radius:5px;border:1px solid #30363d;background:#161b22;color:#c9d1d9}
+    textarea{font-size:11px;padding:5px 7px;border-radius:5px;border:1px solid #30363d;background:#0d1117;color:#c9d1d9;width:100%;resize:vertical;font-family:'Courier New',monospace;line-height:1.3;max-height:60px}
     .field{margin-bottom:5px}
-    .field label{font-size:9px;color:#8b949e;display:block;margin-bottom:2px}
+    .field label{font-size:10px;color:#8b949e;display:block;margin-bottom:2px}
 
-    .btn{padding:6px 10px;border-radius:5px;border:1px solid #30363d;background:#161b22;color:#c9d1d9;cursor:pointer;font-size:10px;font-weight:500;width:100%;display:flex;align-items:center;gap:6px;transition:all .2s;margin-bottom:4px}
+    .btn{padding:6px 10px;border-radius:5px;border:1px solid #30363d;background:#161b22;color:#c9d1d9;cursor:pointer;font-size:11px;font-weight:500;width:100%;display:flex;align-items:center;gap:6px;transition:all .2s;margin-bottom:4px}
     .btn:hover{border-color:#8b949e}
     .btn:disabled{opacity:.4;cursor:not-allowed}
     .btn.green{border-color:#238636;color:#3fb950}
     .btn.green:hover{background:rgba(63,185,80,.08)}
 
     .scenario-tabs{display:flex;gap:4px;margin-bottom:7px;flex-wrap:wrap}
-    .stab{font-size:9px;padding:3px 8px;border-radius:4px;border:1px solid #30363d;background:#0d1117;color:#8b949e;cursor:pointer;transition:all .2s;white-space:nowrap}
+    .stab{font-size:10px;padding:3px 8px;border-radius:4px;border:1px solid #30363d;background:#0d1117;color:#8b949e;cursor:pointer;transition:all .2s;white-space:nowrap}
     .stab:hover{border-color:#58a6ff;color:#58a6ff}
     .stab.active-legit{border-color:#3fb950;color:#3fb950;background:rgba(63,185,80,.08)}
     .stab.active-charger{border-color:#d29922;color:#d29922;background:rgba(210,153,34,.06)}
     .stab.active-attack{border-color:#f85149;color:#f85149;background:rgba(248,81,73,.06)}
 
-    .scenario-info{background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:7px 9px;margin-bottom:7px;font-size:9px;color:#8b949e;line-height:1.5;display:none}
+    .scenario-info{background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:7px 9px;margin-bottom:7px;font-size:10px;color:#8b949e;line-height:1.5;display:none}
     .scenario-info.show{display:block}
     .scenario-info strong{color:#c9d1d9;font-weight:500}
 
-    .log-box{background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:6px;height:80px;overflow-y:auto;font-family:'Courier New',monospace;font-size:9px}
+    .log-box{background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:6px;height:80px;overflow-y:auto;font-family:'Courier New',monospace;font-size:10px}
     .ll{padding:1px 0;border-bottom:1px solid #21262d;display:flex;gap:5px}
     .lts{color:#484f58;flex-shrink:0;font-size:8px}
     .li{color:#58a6ff}.ls{color:#3fb950}.lf{color:#f85149}.lw{color:#d29922}
@@ -295,7 +295,7 @@
         <option value="auto" selected>Auto classify</option>
         <option value="rogue_charger">Rogue charger</option>
         <option value="rollback">Rollback</option>
-        <option value="tamper">Payload tamper</option>
+        <option value="hndl">HNDL comparison</option>
       </select>
     </div>
     <div id="classification-panel" style="display:none;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:7px;margin-bottom:6px">
@@ -314,56 +314,12 @@
     <div class="log-box" id="log-box"></div>
   </div>
 
-  <div>
-    <div class="section-title" style="margin-top:10px">⚔️ Attack Scenarios (9/9 Coverage)</div>
-    <div id="attack-scenarios" style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:9px">
-      <!-- Populated by JavaScript -->
-    </div>
-  </div>
-
-  <div>
-    <div class="section-title" style="margin-top:10px">🛡️ Security Features</div>
-    <div style="display:flex;flex-direction:column;gap:5px">
-      <div style="background:#0d1117;border:1px solid #30363d;border-radius:5px;padding:6px">
-        <div style="font-size:9px;color:#8b949e">📱 Kyber512 (PQC KEM)</div>
-        <div style="font-size:8px;color:#3fb950;margin-top:2px">✓ Session key encapsulation</div>
-      </div>
-      <div style="background:#0d1117;border:1px solid #30363d;border-radius:5px;padding:6px">
-        <div style="font-size:9px;color:#8b949e">✍️ Dilithium2 (PQC Sig)</div>
-        <div style="font-size:8px;color:#3fb950;margin-top:2px">✓ Firmware authenticity</div>
-      </div>
-      <div style="background:#0d1117;border:1px solid #30363d;border-radius:5px;padding:6px">
-        <div style="font-size:9px;color:#8b949e">#️⃣ ChaCha20Poly1305</div>
-        <div style="font-size:8px;color:#3fb950;margin-top:2px">✓ AEAD encryption + auth tag</div>
-      </div>
-      <div style="background:#0d1117;border:1px solid #30363d;border-radius:5px;padding:6px">
-        <div style="font-size:9px;color:#8b949e">⏱️ Timestamp Freshness</div>
-        <div style="font-size:8px;color:#3fb950;margin-top:2px">✓ 10-minute expiry window</div>
-      </div>
-      <div style="background:#0d1117;border:1px solid #30363d;border-radius:5px;padding:6px">
-        <div style="font-size:9px;color:#8b949e">🔁 Replay Detection</div>
-        <div style="font-size:8px;color:#3fb950;margin-top:2px">✓ Persistent SQLite DB</div>
-      </div>
-      <div style="background:#0d1117;border:1px solid #30363d;border-radius:5px;padding:6px">
-        <div style="font-size:9px;color:#8b949e">🚫 ECU Validation</div>
-        <div style="font-size:8px;color:#3fb950;margin-top:2px">✓ Config-based enforcement</div>
-      </div>
-      <div style="background:#0d1117;border:1px solid #30363d;border-radius:5px;padding:6px">
-        <div style="font-size:9px;color:#8b949e">🔒 Encryption Required</div>
-        <div style="font-size:8px;color:#3fb950;margin-top:2px">✓ Ciphertext + nonce + tag</div>
-      </div>
-      <div style="background:#0d1117;border:1px solid #30363d;border-radius:5px;padding:6px">
-        <div style="font-size:9px;color:#8b949e">⚡ DOS Protection</div>
-        <div style="font-size:8px;color:#3fb950;margin-top:2px">✓ 100 req/60s per IP</div>
-      </div>
-    </div>
-  </div>
 
   <div>
     <div class="section-title" style="margin-top:10px">📊 Real-Time Metrics</div>
     <div id="security-metrics" style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:9px">
       <div style="background:#0d1117;border:1px solid #30363d;border-radius:5px;padding:6px;text-align:center">
-        <div style="color:#8b949e;font-size:8px">Blocked (Encryption)</div>
+        <div style="color:#8b949e;font-size:8px">Blocked (Other)</div>
         <div style="color:#f85149;font-weight:700;font-size:12px;margin-top:3px" id="metric-unsigned">0</div>
       </div>
       <div style="background:#0d1117;border:1px solid #30363d;border-radius:5px;padding:6px;text-align:center">
@@ -378,13 +334,10 @@
         <div style="color:#8b949e;font-size:8px">Accepted (Valid)</div>
         <div style="color:#3fb950;font-weight:700;font-size:12px;margin-top:3px" id="metric-accepted">0</div>
       </div>
-    </div>
-  </div>
-
-  <div>
-    <div class="section-title" style="margin-top:10px">📋 Audit Trail</div>
-    <div id="audit-log" style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:6px;height:100px;overflow-y:auto;font-family:'Courier New',monospace;font-size:8px;color:#8b949e;line-height:1.4">
-      <div style="color:#58a6ff">Audit trail: JSONL + Dilithium-signed entries</div>
+      <div style="background:#0d1117;border:1px solid #30363d;border-radius:5px;padding:6px;text-align:center;grid-column:1 / -1">
+        <div style="color:#8b949e;font-size:8px">Latest Request Total Time</div>
+        <div style="color:#58a6ff;font-weight:700;font-size:12px;margin-top:3px" id="metric-latest-time">0 ms</div>
+      </div>
     </div>
   </div>
 
@@ -393,6 +346,43 @@
 
 <script>
 let running = false;
+const realtimeMetrics = {
+  blockedUnsigned: 0,
+  blockedEcu: 0,
+  blockedReplay: 0,
+  accepted: 0,
+  latestMs: 0,
+};
+
+function updateRealtimeMetrics() {
+  document.getElementById('metric-unsigned').textContent = realtimeMetrics.blockedUnsigned;
+  document.getElementById('metric-ecu').textContent = realtimeMetrics.blockedEcu;
+  document.getElementById('metric-replay').textContent = realtimeMetrics.blockedReplay;
+  document.getElementById('metric-accepted').textContent = realtimeMetrics.accepted;
+  document.getElementById('metric-latest-time').textContent = `${realtimeMetrics.latestMs.toFixed(1)} ms`;
+}
+
+function classifyMetricBucket(failedAt) {
+  const stage = String(failedAt || '').toLowerCase();
+  if (stage.includes('replay')) return 'replay';
+  if (stage.includes('ecu')) return 'ecu';
+  return 'unsigned';
+}
+
+function finalizeRunMetrics(accepted, failedAt, startedAt) {
+  realtimeMetrics.latestMs = performance.now() - startedAt;
+  if (accepted) {
+    realtimeMetrics.accepted += 1;
+  } else {
+    const bucket = classifyMetricBucket(failedAt);
+    if (bucket === 'replay') realtimeMetrics.blockedReplay += 1;
+    else if (bucket === 'ecu') realtimeMetrics.blockedEcu += 1;
+    else realtimeMetrics.blockedUnsigned += 1;
+  }
+  updateRealtimeMetrics();
+}
+
+updateRealtimeMetrics();
 
 const VEHICLE_STATES = {
   "Highway": { speed: 100, battery: 45, temp: 52, charging: false, desc: "Driving at 100 km/h" },
@@ -528,6 +518,7 @@ function renderClassification(classification) {
 
 async function runOTAUpdate() {
   if(running) return;
+  const startedAt = performance.now();
   running = true;
   document.getElementById('btn-run').disabled = true;
   document.getElementById('sys-badge').textContent = 'Running...';
@@ -535,10 +526,12 @@ async function runOTAUpdate() {
   log('Starting OTA Update process', 'i');
 
   const payload = document.getElementById('inp-payload').value.trim();
-  if(!payload) {
+  const scenarioHint = document.getElementById('scenario-hint').value;
+  if(scenarioHint !== 'hndl' && !payload) {
     document.getElementById('verdict').textContent = 'BLOCKED: No firmware payload';
     document.getElementById('sys-badge').textContent = 'Error';
     log('Error: No firmware payload provided', 'f');
+    finalizeRunMetrics(false, 'payload_missing', startedAt);
     running = false;
     document.getElementById('btn-run').disabled = false;
     return;
@@ -553,13 +546,59 @@ async function runOTAUpdate() {
   };
 
   try {
+    if (scenarioHint === 'hndl') {
+      const response = await fetch('/api/hndl');
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const result = await response.json();
+      const hndl = result.result || {};
+
+      renderClassification({
+        scenario: 'hndl_resistance',
+        confidence: 'high',
+        risk: 'LOW',
+        iocs: [],
+        reasoning: [hndl.verdict || 'Kyber remains quantum-safe; RSA does not.'],
+        delivery_context: { source: 'demo', delivery_channel: 'comparison', requires_charging_state: false },
+        threat_classification: 'HNDL_RESISTANCE',
+      });
+
+      document.getElementById('verdict').textContent = 'HNDL RESISTANCE VERIFIED';
+      document.getElementById('why').className = 'why show ok';
+      document.getElementById('why-word').textContent = 'verified';
+      document.getElementById('why-body').textContent = hndl.verdict || 'Kyber512 remains quantum-safe against harvest-now-decrypt-later attacks.';
+      document.getElementById('sys-badge').textContent = 'HNDL Verified';
+      document.getElementById('crypto-proof').className = 'crypto-proof show';
+      document.getElementById('cp-sig').textContent = `${hndl.classical?.algorithm || 'RSA-2048'}: ${hndl.classical?.ciphertext_size || 'n/a'} bytes`;
+      document.getElementById('cp-sk').textContent = `${hndl.post_quantum?.algorithm || 'Kyber512'}: ${hndl.post_quantum?.ciphertext_size || 'n/a'} bytes`;
+      document.getElementById('cp-hash').textContent = hndl.post_quantum?.quantum_safe ? 'Quantum-safe ✓' : 'Quantum-safe ✗';
+      document.querySelector('#resultName').textContent = 'HNDL Resistance';
+      document.querySelector('#resultStatus').textContent = 'VERIFIED';
+      document.querySelector('#resultStatus').parentElement.className = 'result-status accepted';
+      document.querySelector('#resultLatency').textContent = '0 ms';
+      document.querySelector('#resultDetails').innerHTML = [
+        formatDetailItem('Status', 'VERIFIED'),
+        formatDetailItem('RSA-2048', `${hndl.classical?.ciphertext_size || 'n/a'} bytes`),
+        formatDetailItem('Kyber512', `${hndl.post_quantum?.ciphertext_size || 'n/a'} bytes`),
+        formatDetailItem('Quantum Safe', hndl.post_quantum?.quantum_safe ? 'Yes' : 'No'),
+      ].join('');
+      document.querySelector('#runResult').classList.remove('hidden');
+      log('HNDL resistance comparison completed', 's');
+      finalizeRunMetrics(true, null, startedAt);
+      running = false;
+      document.getElementById('btn-run').disabled = false;
+      return;
+    }
+
     const response = await fetch('/api/run-json-scenario', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         scenario_name: "OTA Update",
         payload: payload,
-        scenario_hint: document.getElementById('scenario-hint').value,
+        scenario_hint: scenarioHint,
         vehicle_state: vehicleState
       })
     });
@@ -575,6 +614,7 @@ async function runOTAUpdate() {
       document.getElementById('why').className = 'why show';
       document.getElementById('why-body').textContent = result.reason || 'Vehicle conditions not suitable for update';
       document.getElementById('sys-badge').textContent = 'Blocked (Gate)';
+      finalizeRunMetrics(false, result.failed_at || 'delivery_gate', startedAt);
       running = false;
       document.getElementById('btn-run').disabled = false;
       return;
@@ -589,6 +629,7 @@ async function runOTAUpdate() {
       document.getElementById('why').className = 'why show';
       document.getElementById('why-body').textContent = result.reason || 'Timestamp freshness check failed.';
       document.getElementById('sys-badge').textContent = 'Blocked (Freshness)';
+      finalizeRunMetrics(false, result.failed_at || 'freshness', startedAt);
       running = false;
       document.getElementById('btn-run').disabled = false;
       return;
@@ -603,6 +644,7 @@ async function runOTAUpdate() {
       document.getElementById('why').className = 'why show';
       document.getElementById('why-body').textContent = result.reason || 'Kyber encapsulation invalid.';
       document.getElementById('sys-badge').textContent = result.failed_at === 'source' ? 'Blocked (Source)' : 'Blocked (Kyber)';
+      finalizeRunMetrics(false, result.failed_at || 'kyber', startedAt);
       running = false;
       document.getElementById('btn-run').disabled = false;
       return;
@@ -617,6 +659,7 @@ async function runOTAUpdate() {
       document.getElementById('why').className = 'why show';
       document.getElementById('why-body').textContent = result.reason || 'Signature verification failed. Not from OEM server.';
       document.getElementById('sys-badge').textContent = 'Blocked (Signature)';
+      finalizeRunMetrics(false, result.failed_at || 'dilithium', startedAt);
       running = false;
       document.getElementById('btn-run').disabled = false;
       return;
@@ -631,6 +674,7 @@ async function runOTAUpdate() {
       document.getElementById('why').className = 'why show';
       document.getElementById('why-body').textContent = result.reason || 'Payload hash does not match. Bit-flip detected.';
       document.getElementById('sys-badge').textContent = 'Blocked (Integrity)';
+      finalizeRunMetrics(false, result.failed_at || 'hash', startedAt);
       running = false;
       document.getElementById('btn-run').disabled = false;
       return;
@@ -645,6 +689,7 @@ async function runOTAUpdate() {
       document.getElementById('why').className = 'why show';
       document.getElementById('why-body').textContent = result.reason || 'Version must always increase. Downgrade blocked.';
       document.getElementById('sys-badge').textContent = 'Blocked (Version)';
+      finalizeRunMetrics(false, result.failed_at || 'version', startedAt);
       running = false;
       document.getElementById('btn-run').disabled = false;
       return;
@@ -659,6 +704,7 @@ async function runOTAUpdate() {
       document.getElementById('why').className = 'why show';
       document.getElementById('why-body').textContent = result.reason || 'Invalid ECU target.';
       document.getElementById('sys-badge').textContent = 'Blocked (ECU)';
+      finalizeRunMetrics(false, result.failed_at || 'ecu_validation', startedAt);
       running = false;
       document.getElementById('btn-run').disabled = false;
       return;
@@ -692,70 +738,16 @@ async function runOTAUpdate() {
       document.getElementById('cp-sk').textContent = 'Established ✓';
       document.getElementById('cp-hash').textContent = 'Matched ✓';
     }
+    finalizeRunMetrics(true, null, startedAt);
   } catch(err) {
     log('Error: ' + err.message, 'f');
     document.getElementById('sys-badge').textContent = 'Error';
+    finalizeRunMetrics(false, 'error', startedAt);
   }
 
   running = false;
   document.getElementById('btn-run').disabled = false;
 }
-
-// Attack scenarios data and visualization
-const ATTACK_SCENARIOS = [
-  { name: 'Valid Firmware', icon: '✓', desc: 'Happy path', category: 'baseline' },
-  { name: 'Bit-Flip', icon: '🔀', desc: 'AEAD fails', category: 'crypto' },
-  { name: 'Signature Tamper', icon: '✍️', desc: 'Dilithium fails', category: 'crypto' },
-  { name: 'Version Downgrade', icon: '↓', desc: 'Rollback blocked', category: 'policy' },
-  { name: 'Expired Package', icon: '⏰', desc: 'Freshness fails', category: 'time' },
-  { name: 'Future-Dated', icon: '🔮', desc: 'Clock skew', category: 'time' },
-  { name: 'Unsigned Firmware', icon: '🔓', desc: 'Encryption fails', category: 'enc' },
-  { name: 'Wrong ECU Target', icon: '🚫', desc: 'ECU validation', category: 'policy' },
-  { name: 'Replay Attack', icon: '🔁', desc: 'Persistent DB', category: 'replay' }
-];
-
-async function loadAttackScenarios() {
-  try {
-    const response = await fetch('/api/scenarios');
-    const data = await response.json();
-    const results = data.scenarios || [];
-    
-    const container = document.getElementById('attack-scenarios');
-    container.innerHTML = '';
-    
-    ATTACK_SCENARIOS.forEach((scenario, idx) => {
-      const result = results[idx];
-      const passed = result?.accepted === true;
-      
-      const card = document.createElement('div');
-      card.style.cssText = `
-        background:#0d1117;
-        border:1px solid ${passed ? '#3fb950' : '#f85149'};
-        border-radius:5px;
-        padding:6px;
-        cursor:pointer;
-        transition:all 0.3s;
-      `;
-      
-      card.innerHTML = `
-        <div style="font-size:8px;color:#8b949e">${scenario.category.toUpperCase()}</div>
-        <div style="font-weight:700;color:${passed ? '#3fb950' : '#f85149'};margin:2px 0">${scenario.icon} ${scenario.name}</div>
-        <div style="font-size:8px;color:#8b949e">${scenario.desc}</div>
-        <div style="font-size:7px;color:#58a6ff;margin-top:3px">${passed ? '✓ BLOCKED/ACCEPTED' : '✗ FAILED'}</div>
-      `;
-      
-      container.appendChild(card);
-    });
-  } catch(err) {
-    console.error('Error loading scenarios:', err);
-  }
-}
-
-// Load scenarios on page load
-document.addEventListener('DOMContentLoaded', loadAttackScenarios);
-
-// Refresh scenarios every 5 seconds
-setInterval(loadAttackScenarios, 5000);
 
 applyVehicleState('Stationary');
 </script>

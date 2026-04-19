@@ -10,7 +10,6 @@ from attacks.charger_security_demo import simulate_authenticated_charger_update,
 from attacks.hndl_demo import run_hndl_demo
 from attacks.rogue_charger import simulate_rogue_charger_attack
 from attacks.rollback_demo import simulate_rollback_attack
-from attacks.tamper_demo import simulate_tamper_attack
 from core import dilithium, kyber
 from core.scenario_logger import ScenarioLogger
 from vehicle.charger_security import ChargerSecurityManager
@@ -155,6 +154,8 @@ def run_single_scenario(
 		vehicle_state,
 	)
 
+	hndl_report = run_hndl_demo()
+
 	# Scenario runners
 	scenario_runners: dict[str, callable] = {
 		"Legitimate OTA": lambda: gateway.receive_update_request(
@@ -196,7 +197,12 @@ def run_single_scenario(
 		),
 		"Rogue Charger Attack": lambda: simulate_rogue_charger_attack(gateway),
 		"Rollback Attack": lambda: simulate_rollback_attack(gateway, server),
-		"Tamper Attack": lambda: simulate_tamper_attack(gateway, server),
+		"HNDL Resistance": lambda: {
+			"accepted": True,
+			"failed_at": None,
+			"result": hndl_report,
+			"summary": hndl_report["verdict"],
+		},
 	}
 
 	if scenario_name not in scenario_runners:
@@ -314,6 +320,8 @@ def build_demo_report() -> dict:
 		{"mode": "steady", "battery_soc": 64, "temperature_c": 31},
 	)
 
+	hndl_report = run_hndl_demo()
+
 	def legitimate_ota() -> dict:
 		package = server.prepare_update(
 			payload=b"firmware_v2",
@@ -365,10 +373,16 @@ def build_demo_report() -> dict:
 		_run_scenario("Replay Attack", replay_attack),
 		_run_scenario("Rogue Charger Attack", lambda: simulate_rogue_charger_attack(gateway)),
 		_run_scenario("Rollback Attack", lambda: simulate_rollback_attack(gateway, server)),
-		_run_scenario("Tamper Attack", lambda: simulate_tamper_attack(gateway, server)),
+		_run_scenario(
+			"HNDL Resistance",
+			lambda: {
+				"accepted": True,
+				"failed_at": None,
+				"result": hndl_report,
+				"summary": hndl_report["verdict"],
+			},
+		),
 	]
-
-	hndl_report = run_hndl_demo()
 	stage_timings: list[float] = []
 	for scenario in scenarios:
 		stage_timings.extend(scenario["result"].get("stage_durations_ms", {}).values())
@@ -384,7 +398,7 @@ def build_demo_report() -> dict:
 		"title": "PQDrive OTA and Charger Security Demo",
 		"threat_model": {
 			"entry_points": ["OTA request ingress", "charger-authenticated update path", "CAN simulation bus"],
-			"attack_paths": ["rogue charger", "payload tamper", "rollback", "replay", "unsafe charging session"],
+			"attack_paths": ["rogue charger", "harvest-now-decrypt-later", "rollback", "replay", "unsafe charging session"],
 			"target_systems": ["gateway", "vehicle OTA pipeline", "safety-critical ECU policy", "recovery manager"],
 		},
 		"policy": {

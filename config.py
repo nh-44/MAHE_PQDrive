@@ -52,7 +52,7 @@ SCENARIOS = [
     "Replay Attack",
     "Rogue Charger Attack",
     "Rollback Attack",
-    "Tamper Attack",
+    "HNDL Resistance",
 ]
 
 # Threat Injection Types

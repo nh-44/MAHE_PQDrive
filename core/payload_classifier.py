@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -40,6 +42,34 @@ THREAT_LEGITIMATE = "LEGITIMATE"
 THREAT_ROGUE_VERSION = "ROGUE_VERSION"
 THREAT_ROLLBACK = "ROLLBACK"
 THREAT_PAYLOAD_TAMPER = "PAYLOAD_TAMPER"
+
+BODY_HEX_FIELDS = ("BODY_HEX", "PAYLOAD_BODY_HEX", "PAYLOAD_HEX", "CONTENT_HEX")
+BODY_B64_FIELDS = ("BODY_B64", "PAYLOAD_BODY_B64", "PAYLOAD_B64", "CONTENT_B64")
+BODY_RAW_FIELDS = ("BODY_RAW", "PAYLOAD_BODY_RAW", "CONTENT_RAW", "BODY")
+
+# Trust store keyed by BUILD id: expected SHA-256 over the raw firmware body bytes.
+BUILD_CONTENT_TRUST_STORE: dict[str, dict[str, Any]] = {
+	"20240318-a4f2c1": {
+		"expected_body_sha256": "34d086542734c61e52a2a6b19b9f567fd466a2f7eab90453abc93fab3b5e8ca7",
+		"expected_modules": ["LANE_KEEP_v4", "COLLISION_WARN_v3", "BLIND_SPOT_v2", "SIGN_RECOG_v5"],
+	},
+	"20240318-b8e3d7": {
+		"expected_body_sha256": "25aff0b5dda60cbe84a5d6bf27eb134f12d21f8289f5b1c5fc3d717e49378400",
+		"expected_modules": ["TORQUE_CTL_v6", "REGEN_BRAKE_v4", "THERMAL_MGMT_v3"],
+	},
+	"20240318-c1f9a2": {
+		"expected_body_sha256": "d2eb566d49e2921560a170bbea78c9f7094441a9a3c9e1f378ad7f19750b9862",
+		"expected_modules": ["DOOR_LOCK_v3", "WINDOW_CTL_v2", "LIGHT_MGR_v4", "SENSOR_FUSION_v2"],
+	},
+	"20240318-d7c4b5": {
+		"expected_body_sha256": "7ddbac96f34b370c673822f3e8c82f365d06f4318f5165e99bcaa1e3dc59b051",
+		"expected_modules": ["ABS_CTL_v5", "STABILITY_v4", "STEER_ASSIST_v3", "SUSP_CTL_v2"],
+	},
+	"20240318-e2a7f8": {
+		"expected_body_sha256": "b76f83836c79faf1c09470606ccb8fb3d721f24dff18b173c137c01c296a9219",
+		"expected_modules": ["MAP_CORE_v8", "NAV_UI_v5", "VOICE_ASSIST_v4", "MEDIA_SYNC_v6"],
+	},
+}
 
 
 ECU_PROFILES: dict[str, ECUProfile] = {
@@ -158,6 +188,86 @@ def parse_firmware_payload(payload_text: str) -> dict[str, Any]:
 			parsed["timestamp_warning"] = "timestamp is not RFC3339-compatible"
 
 	return parsed
+
+
+def extract_raw_payload_body_bytes(parsed: dict[str, Any]) -> bytes | None:
+	"""Extract raw firmware body bytes from parsed payload fields.
+
+	Only explicit body/content fields are treated as raw payload body.
+	"""
+	fields = parsed.get("fields", {})
+
+	for key in BODY_HEX_FIELDS:
+		value = fields.get(key)
+		if not value:
+			continue
+		try:
+			return bytes.fromhex(value)
+		except ValueError:
+			return None
+
+	for key in BODY_B64_FIELDS:
+		value = fields.get(key)
+		if not value:
+			continue
+		try:
+			return base64.b64decode(value, validate=True)
+		except Exception:
+			return None
+
+	for key in BODY_RAW_FIELDS:
+		value = fields.get(key)
+		if value:
+			return value.encode("utf-8")
+
+	return None
+
+
+def evaluate_payload_tamper(parsed: dict[str, Any]) -> dict[str, Any]:
+	"""Final-stage tamper detection: metadata passes, body hash mismatches trust store."""
+	if not parsed.get("valid"):
+		return {"checked": False, "reason": "invalid_payload"}
+
+	ecu_id = parsed.get("ecu_id")
+	build = parsed.get("build")
+	sw = parsed.get("sw")
+	modules = parsed.get("modules", [])
+
+	profile = ECU_PROFILES.get(ecu_id)
+	if profile is None:
+		return {"checked": False, "reason": "unknown_ecu"}
+
+	# Tamper stage runs only after metadata validation prerequisites pass.
+	if sw != profile.legit_sw:
+		return {"checked": False, "reason": "sw_not_current"}
+	if build != profile.legit_build:
+		return {"checked": False, "reason": "build_not_recognized"}
+
+	trust_entry = BUILD_CONTENT_TRUST_STORE.get(build)
+	if trust_entry is None:
+		return {"checked": False, "reason": "build_missing_from_trust_store"}
+
+	expected_modules = trust_entry.get("expected_modules", [])
+	if sorted(modules) != sorted(expected_modules):
+		return {"checked": False, "reason": "modules_mismatch"}
+
+	body_bytes = extract_raw_payload_body_bytes(parsed)
+	if body_bytes is None:
+		return {"checked": False, "reason": "raw_body_missing"}
+
+	computed_body_sha256 = hashlib.sha256(body_bytes).hexdigest()
+	expected_body_sha256 = trust_entry["expected_body_sha256"]
+	tampered = computed_body_sha256 != expected_body_sha256
+
+	return {
+		"checked": True,
+		"tampered": tampered,
+		"build": build,
+		"ecu_id": ecu_id,
+		"computed_body_sha256": computed_body_sha256,
+		"expected_body_sha256": expected_body_sha256,
+		"reason": "content_hash_mismatch" if tampered else "content_hash_match",
+	}
 
 
 def classify_payload(payload_text: str) -> dict[str, Any]:
@@ -292,7 +402,7 @@ def classify_payload(payload_text: str) -> dict[str, Any]:
 			"legitimate_ota": THREAT_LEGITIMATE,
 			"rogue_charger": THREAT_ROGUE_VERSION,
 			"rollback_attack": THREAT_ROLLBACK,
-			"legitimate_or_metadata_clone": THREAT_PAYLOAD_TAMPER if ecu_id == "CHAS-4.0" else THREAT_LEGITIMATE,
+			"legitimate_or_metadata_clone": THREAT_LEGITIMATE,
 			"version_anomaly": THREAT_ROGUE_VERSION,
 		}.get(scenario, THREAT_LEGITIMATE),
 		"profile": {

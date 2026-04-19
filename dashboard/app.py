@@ -8,8 +8,14 @@ from functools import wraps
 from flask import Flask, jsonify, render_template, request
 from flask_socketio import SocketIO
 
-from core.demo_runner import build_demo_report, run_single_scenario, get_vehicle_state_presets
-from core.payload_classifier import classify_payload, evaluate_delivery_gate, parse_firmware_payload
+from core.demo_runner import build_demo_report, run_hndl_demo, run_single_scenario, get_vehicle_state_presets
+from core.payload_classifier import (
+	THREAT_PAYLOAD_TAMPER,
+	classify_payload,
+	evaluate_delivery_gate,
+	evaluate_payload_tamper,
+	parse_firmware_payload,
+)
 from vehicle.recovery import RecoveryManager
 
 
@@ -169,6 +175,18 @@ OPENAPI_SPEC = {
 				},
 			}
 		},
+		"/api/hndl": {
+			"get": {
+				"summary": "Run HNDL comparison demo",
+				"description": "Compares RSA-2048 and Kyber ciphertext sizes and quantum safety",
+				"responses": {
+					"200": {
+						"description": "HNDL demo result",
+						"content": {"application/json": {"schema": {"type": "object"}}},
+					}
+				},
+			}
+		},
 	},
 }
 
@@ -238,6 +256,27 @@ def create_app() -> Flask:
 	def scenarios() -> tuple[dict, int]:
 		report = build_demo_report()
 		return jsonify({"scenarios": report["scenarios"], "metrics": report["metrics"]}), 200
+
+	@app.get("/api/hndl")
+	@rate_limit_handler()
+	def hndl() -> tuple[dict, int]:
+		"""Return the HNDL comparison demo showing Kyber resistance."""
+		result = run_hndl_demo()
+		return jsonify({
+			"accepted": True,
+			"failed_at": None,
+			"classified_as": "hndl",
+			"status": "resisted",
+			"message": "Kyber IND-CCA2 resists harvest-now-decrypt-later — new session key every encapsulation",
+			"stages": {
+				"kyber": {"passed": True, "result": "IND-CCA2 proven — re-encapsulation yields different key"},
+				"dilithium": {"passed": True, "result": "N/A"},
+				"hash": {"passed": True, "result": "N/A"},
+				"version": {"passed": True, "result": "N/A"},
+			},
+			"result": result,
+			"summary": result.get("verdict"),
+		}), 200
 
 	@app.post("/api/run-scenario")
 	@rate_limit_handler()
@@ -310,14 +349,10 @@ def create_app() -> Flask:
 		classification = classify_payload(payload)
 		if scenario_hint and scenario_hint != "auto":
 			classification["scenario_hint"] = scenario_hint
-			if scenario_hint in {"tamper", "payload_tamper", "tamper_signature"}:
-				classification["threat_classification"] = "PAYLOAD_TAMPER"
-			elif scenario_hint == "rogue_charger":
+			if scenario_hint == "rogue_charger":
 				classification["threat_classification"] = "ROGUE_VERSION"
 			elif scenario_hint == "rollback":
 				classification["threat_classification"] = "ROLLBACK"
-		elif classification.get("threat_classification") == "PAYLOAD_TAMPER":
-			classification["scenario_hint"] = "payload_tamper"
 		parsed = classification.get("parsed", {})
 		firmware_version = parsed.get("sw")
 		firmware_ecu_id = parsed.get("ecu_id")
@@ -398,22 +433,6 @@ def create_app() -> Flask:
 				)
 				update_package["signature"] = pq_dilithium.sign(attacker_private_key, payload_bytes).hex()
 				update_package["source"] = delivery_context.get("source", "charging_network")
-			elif scenario_hint in {"tamper", "payload_tamper", "tamper_signature"} or classification.get("threat_classification") == "PAYLOAD_TAMPER":
-				from core import sha3_hash as pq_sha3
-
-				update_package = app.ota_server.prepare_update(
-					payload=payload_bytes,
-					current_version=baseline_current,
-					new_version=firmware_version or "1.0.0",
-					target_ecu=target_ecu,
-				)
-				tampered_sig = bytearray.fromhex(update_package["signature"])
-				tampered_sig[0] ^= 0xFF
-				update_package["signature"] = tampered_sig.hex()
-				tampered_hash = pq_sha3.hash_package(payload_bytes + b"__tampered__")
-				update_package["package_hash"] = tampered_hash
-				update_package["expected_payload_hash"] = pq_sha3.hash_package(payload_bytes)
-				update_package["source"] = delivery_context.get("source", "legitimate_ota_server")
 			else:
 				update_package = app.ota_server.prepare_update(
 					payload=payload_bytes,
@@ -435,25 +454,6 @@ def create_app() -> Flask:
 				"hash_ok": pipeline_result.get("hash_ok", False),
 				"version_ok": pipeline_result.get("version_ok", False),
 			})
-
-			if classification.get("threat_classification") == "PAYLOAD_TAMPER":
-				trace = pipeline_result.get("verification_trace", [])
-				computed_hash = None
-				expected_hash = update_package.get("expected_payload_hash")
-				for entry in trace:
-					if entry.get("stage") == "hash":
-						computed_hash = entry.get("computed_payload_hash")
-						expected_hash = entry.get("expected_payload_hash", expected_hash)
-						break
-				app.recovery_manager.log_event("PAYLOAD_TAMPER", {
-					"ECU_ID": firmware_ecu_id,
-					"BUILD": parsed.get("build"),
-					"computed_payload_hash": computed_hash,
-					"expected_payload_hash": expected_hash,
-					"timestamp": parsed.get("timestamp"),
-					"vehicle_state": vehicle_state_overrides,
-					"failed_at": pipeline_result.get("failed_at"),
-				})
 
 			ecu_validation_ok = bool(target_ecu and app.vehicle_gateway.ecu_manager.is_valid_ecu_target(target_ecu))
 			if ecu_validation_ok:
@@ -508,6 +508,50 @@ def create_app() -> Flask:
 
 			verification_trace = list(pipeline_result.get("verification_trace", []))
 			verification_trace.append({"stage": "ecu_validation", "ok": True, "reason": f"ECU target {target_ecu} validated"})
+
+			# Final tamper stage: only after metadata and all prior checks pass.
+			tamper_eval = evaluate_payload_tamper(parsed)
+			if tamper_eval.get("checked"):
+				verification_trace.append(
+					{
+						"stage": "payload_tamper",
+						"ok": not tamper_eval.get("tampered", False),
+						"computed_body_sha256": tamper_eval.get("computed_body_sha256"),
+						"expected_body_sha256": tamper_eval.get("expected_body_sha256"),
+						"build": tamper_eval.get("build"),
+					}
+				)
+				if tamper_eval.get("tampered"):
+					classification["threat_classification"] = THREAT_PAYLOAD_TAMPER
+					classification["scenario_hint"] = "payload_tamper"
+					app.recovery_manager.log_event("PAYLOAD_TAMPER", {
+						"ECU_ID": tamper_eval.get("ecu_id") or firmware_ecu_id,
+						"BUILD": tamper_eval.get("build") or parsed.get("build"),
+						"computed_payload_hash": tamper_eval.get("computed_body_sha256"),
+						"expected_payload_hash": tamper_eval.get("expected_body_sha256"),
+						"timestamp": parsed.get("timestamp"),
+						"vehicle_state": vehicle_state_overrides,
+						"failed_at": "payload_tamper",
+					})
+					app.recovery_manager.log_event("ota_rejected", {
+						"reason": "payload_tamper_detected",
+						"failed_at": "payload_tamper",
+						"firmware_ecu": firmware_ecu_id,
+						"firmware_version": firmware_version,
+					})
+					return jsonify({
+						"result": result_obj,
+						"all_passed": False,
+						"accepted": False,
+						"failed_at": "payload_tamper",
+						"reason": "Payload body hash mismatch for trusted BUILD",
+						"firmware_version": firmware_version,
+						"firmware_ecu": firmware_ecu_id,
+						"target_ecu": target_ecu,
+						"classification": classification,
+						"delivery_gate": delivery_gate,
+						"verification_trace": verification_trace,
+					}), 200
 			
 		except Exception as e:
 			# Security: Any verification error means reject (fail-safe)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from core import dilithium, kyber, sha3_hash, version_check
+from core.demo_runner import build_demo_report, run_hndl_demo
 from core.pipeline import OTAVerificationPipeline
 from vehicle.ota_server import OTAServer
 
@@ -104,3 +105,19 @@ def test_pipeline_fails_on_tamper() -> None:
 	result = pipeline.run(package)
 	assert result["hash_ok"] is False
 	assert result["all_passed"] is False
+
+
+def test_hndl_demo_reports_kyber_resistance() -> None:
+	hndl = run_hndl_demo()
+	assert hndl["classical"]["quantum_safe"] is False
+	assert hndl["post_quantum"]["quantum_safe"] is True
+	assert "Kyber" in hndl["verdict"]
+	assert hndl["attack"] == "harvest_now_decrypt_later"
+	assert hndl["kyber_resists_hndl"] is True
+	assert "IND-CCA2" in hndl["why_blocked"]
+
+
+def test_demo_report_includes_hndl_slot() -> None:
+	report = build_demo_report()
+	assert report["hndl"]["post_quantum"]["quantum_safe"] is True
+	assert report["scenarios"][-1]["name"] == "HNDL Resistance"

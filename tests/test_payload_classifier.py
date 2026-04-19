@@ -52,7 +52,7 @@ def test_classify_marks_chassis_clone_as_medium_confidence() -> None:
 
 	assert classification["scenario"] == "legitimate_or_metadata_clone"
 	assert classification["confidence"] == "medium"
-	assert classification["threat_classification"] == "PAYLOAD_TAMPER"
+	assert classification["threat_classification"] == "LEGITIMATE"
 	assert "stealth_clone_possible" in classification["iocs"]
 
 
@@ -114,6 +114,7 @@ def test_payload_tamper_forces_content_verification_failure() -> None:
 	payload = (
 		"ECU_ID:BODY-2.0 | HW:REV-A | SW:2.0.0 | BUILD:20240318-c1f9a2 | "
 		"REGION:EU | MODULES:DOOR_LOCK_v3,WINDOW_CTL_v2,LIGHT_MGR_v4,SENSOR_FUSION_v2 | "
+		"BODY_HEX:deadbeef | "
 		"TS:2024-03-18T09:18:11Z"
 	)
 	client = app.test_client()
@@ -127,5 +128,5 @@ def test_payload_tamper_forces_content_verification_failure() -> None:
 	).get_json()
 
 	assert result["classification"]["threat_classification"] == "PAYLOAD_TAMPER"
-	assert result["failed_at"] in {"dilithium", "hash"}
+	assert result["failed_at"] == "payload_tamper"
 	assert result["delivery_gate"]["ok"] is True
