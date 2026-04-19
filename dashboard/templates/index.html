@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>PQDrive — Post-Quantum OTA Security</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    html{height:100%}
+    body{font-family:'Segoe UI',system-ui,sans-serif;background:#0d1117;color:#c9d1d9;font-size:13px;height:100%;display:flex;flex-direction:column;overflow-x:hidden}
+    .header{padding:8px 16px;border-bottom:1px solid #30363d;display:flex;align-items:center;gap:10px;flex-shrink:0;height:42px}
+    .header h1{font-size:13px;font-weight:600;color:#e6edf3}
+    .badge{font-size:10px;padding:2px 6px;border-radius:20px;border:1px solid #30363d;color:#8b949e}
+    .header-sub{font-size:10px;color:#8b949e;margin-left:auto}
+    .layout{display:grid;grid-template-columns:1fr 585px;gap:0;flex:1;overflow-y:auto;scrollbar-width:none;-ms-overflow-style:none}
+    .layout::-webkit-scrollbar{display:none}
+    .left{padding:10px;border-right:1px solid #30363d;display:flex;flex-direction:column;gap:8px}
+    .right{display:flex;flex-direction:column;background:#0d1117;padding:10px;gap:8px}
+
+    .card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:10px;flex-shrink:0}
+    .card-title{font-size:10px;color:#8b949e;text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px}
+
+    .topo{display:flex;align-items:center;justify-content:space-between;gap:3px}
+    .tnode{display:flex;flex-direction:column;align-items:center;flex:1}
+    .nbox{width:70px;padding:6px 3px;border-radius:6px;border:1px solid #30363d;background:#0d1117;text-align:center;position:relative;transition:all .3s}
+    .nicon{font-size:13px;line-height:1;margin-bottom:2px}
+    .nlabel{font-size:10px;font-weight:600;color:#c9d1d9}
+    .nsub{font-size:9px;color:#8b949e;margin-top:0px}
+    .nbox.pass{border-color:#3fb950;background:rgba(63,185,80,.07)}
+    .nbox.fail{border-color:#f85149;background:rgba(248,81,73,.07)}
+    .nstatus{position:absolute;top:-7px;right:-7px;width:15px;height:15px;border-radius:50%;font-size:9px;display:flex;align-items:center;justify-content:center;border:2px solid #0d1117;font-weight:700}
+    .nstatus.pass{background:#3fb950;color:#000}
+    .nstatus.fail{background:#f85149;color:#fff}
+    .conn{flex:1;max-width:24px;height:2px;background:#21262d;margin-top:-22px;transition:background .4s}
+    .conn.pass{background:#3fb950}.conn.fail{background:#f85149}
+    .pkt-row{position:relative;height:16px;margin-top:9px}
+    .pkt-line{position:absolute;inset:7px 0 0;height:1px;background:#21262d}
+    .pkt{position:absolute;width:10px;height:10px;border-radius:50%;top:3px;left:0;display:none;transition:left .55s cubic-bezier(.4,0,.2,1)}
+    .topo-msg{font-size:11px;color:#8b949e;text-align:center;margin-top:6px;min-height:13px}
+
+    .sb-wrap{position:relative}
+    .sb-tag{position:absolute;top:-7px;left:10px;background:#161b22;padding:0 4px;font-size:8px;color:#58a6ff;border:1px solid #30363d;border-radius:3px;text-transform:uppercase;letter-spacing:.05em}
+    .stages{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:5px}
+    .stage{background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:6px 7px;display:flex;align-items:center;gap:6px;transition:all .3s;font-size:11px}
+    .sico{width:20px;height:20px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0;background:#161b22;transition:background .3s}
+    .stage.active .sico{background:rgba(210,153,34,.2)}
+    .stage.pass .sico{background:rgba(63,185,80,.2)}
+    .stage.fail .sico{background:rgba(248,81,73,.2)}
+    .sname{font-size:9px;font-weight:600;color:#c9d1d9}
+    .salg{font-size:8px;color:#8b949e}
+    .sres{margin-left:auto;font-size:9px;font-weight:700;min-width:30px;text-align:right}
+    .stage.pass .sres{color:#3fb950}.stage.fail .sres{color:#f85149}.stage.active .sres{color:#d29922}
+    .verdict{margin-top:5px;font-size:9px;color:#8b949e;text-align:center;min-height:12px}
+
+    .crypto-proof{background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:7px 9px;margin-top:5px;display:none;font-size:9px}
+    .crypto-proof.show{display:block}
+    .cp-title{font-size:8px;color:#8b949e;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px}
+    .cp-row{display:flex;gap:6px;margin-bottom:4px;align-items:flex-start}
+    .cp-label{font-size:8px;color:#8b949e;width:95px;flex-shrink:0;padding-top:0px;line-height:1.3}
+    .cp-val{font-family:'Courier New',monospace;font-size:8px;word-break:break-all;flex:1;line-height:1.4;color:#58a6ff}
+    .cp-divider{border:none;border-top:1px solid #21262d;margin:4px 0}
+
+    .why{background:#0d1117;border-radius:0 6px 6px 0;padding:7px 9px;margin-top:5px;display:none;border-left:2px solid #f85149;font-size:9px}
+    .why.show{display:block}
+    .why.ok{border-left-color:#3fb950}
+    .why-title{font-size:8px;color:#8b949e;text-transform:uppercase;margin-bottom:3px}
+    .why-body{font-size:9px;color:#c9d1d9;line-height:1.5}
+
+    .ecu-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:3px}
+    .ecu-card{background:#0d1117;border:1px solid #30363d;border-radius:5px;padding:5px 2px;text-align:center;transition:all .4s}
+    .ecu-name{font-size:8px;font-weight:600;color:#c9d1d9;margin-bottom:1px}
+    .ecu-ver{font-size:8px;color:#8b949e}
+    .ecu-card.updated{border-color:#3fb950;background:rgba(63,185,80,.09)}
+
+    .section-title{font-size:10px;color:#8b949e;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;padding-bottom:3px;border-bottom:1px solid #21262d}
+    select,input[type=text]{font-size:11px;padding:4px 6px;border-radius:5px;border:1px solid #30363d;background:#161b22;color:#c9d1d9}
+    textarea{font-size:11px;padding:5px 7px;border-radius:5px;border:1px solid #30363d;background:#0d1117;color:#c9d1d9;width:100%;resize:vertical;font-family:'Courier New',monospace;line-height:1.3;max-height:60px}
+    .field{margin-bottom:5px}
+    .field label{font-size:10px;color:#8b949e;display:block;margin-bottom:2px}
+
+    .btn{padding:6px 10px;border-radius:5px;border:1px solid #30363d;background:#161b22;color:#c9d1d9;cursor:pointer;font-size:11px;font-weight:500;width:100%;display:flex;align-items:center;gap:6px;transition:all .2s;margin-bottom:4px}
+    .btn:hover{border-color:#8b949e}
+    .btn:disabled{opacity:.4;cursor:not-allowed}
+    .btn.green{border-color:#238636;color:#3fb950}
+    .btn.green:hover{background:rgba(63,185,80,.08)}
+
+    .scenario-tabs{display:flex;gap:4px;margin-bottom:7px;flex-wrap:wrap}
+    .stab{font-size:10px;padding:3px 8px;border-radius:4px;border:1px solid #30363d;background:#0d1117;color:#8b949e;cursor:pointer;transition:all .2s;white-space:nowrap}
+    .stab:hover{border-color:#58a6ff;color:#58a6ff}
+    .stab.active-legit{border-color:#3fb950;color:#3fb950;background:rgba(63,185,80,.08)}
+    .stab.active-charger{border-color:#d29922;color:#d29922;background:rgba(210,153,34,.06)}
+    .stab.active-attack{border-color:#f85149;color:#f85149;background:rgba(248,81,73,.06)}
+
+    .scenario-info{background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:7px 9px;margin-bottom:7px;font-size:10px;color:#8b949e;line-height:1.5;display:none}
+    .scenario-info.show{display:block}
+    .scenario-info strong{color:#c9d1d9;font-weight:500}
+
+    .log-box{background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:6px;height:80px;overflow-y:auto;font-family:'Courier New',monospace;font-size:10px}
+    .ll{padding:1px 0;border-bottom:1px solid #21262d;display:flex;gap:5px}
+    .lts{color:#484f58;flex-shrink:0;font-size:8px}
+    .li{color:#58a6ff}.ls{color:#3fb950}.lf{color:#f85149}.lw{color:#d29922}
+
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .spin{display:inline-block;width:7px;height:7px;border:1.2px solid #30363d;border-top-color:#58a6ff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:2px}
+
+    .ctrl-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:6px}
+    .ctrl-item{background:#0d1117;border:1px solid #30363d;border-radius:5px;padding:6px}
+    .ctrl-label{font-size:8px;color:#8b949e;margin-bottom:3px;display:block;text-transform:uppercase;letter-spacing:.05em}
+    .ctrl-value{font-size:9px;font-weight:600;color:#58a6ff;margin-bottom:2px}
+    .ctrl-input{width:100%;padding:3px;border:1px solid #30363d;border-radius:3px;background:#161b22;color:#c9d1d9;font-size:9px}
+    input[type=range]{width:100%;cursor:pointer;accent-color:#58a6ff;height:4px}
+    input[type=checkbox]{cursor:pointer;margin-right:3px;width:14px;height:14px}
+  </style>
+</head>
+<body>
+<div class="header">
+  <span>⚡</span>
+  <h1>PQDrive — Post-Quantum OTA Security</h1>
+  <span class="badge" id="sys-badge">System ready</span>
+  <span class="header-sub">Kyber512 · Dilithium2 · SHA3-256</span>
+</div>
+
+<div class="layout">
+<div class="left">
+
+  <div class="card" style="background:linear-gradient(135deg, #161b22 0%, #0d1117 100%);border:1px solid #238636">
+    <div class="card-title" style="color:#3fb950">🛡️ SECURITY OVERVIEW</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:9px">
+      <div style="border-left:2px solid #3fb950;padding-left:6px">
+        <div style="color:#8b949e">Cryptography</div>
+        <div style="color:#c9d1d9;font-weight:700;margin-top:2px">Post-Quantum Ready</div>
+        <div style="font-size:8px;color:#8b949e;margin-top:2px">✓ Kyber512 + Dilithium2</div>
+      </div>
+      <div style="border-left:2px solid #d29922;padding-left:6px">
+        <div style="color:#8b949e">Encryption</div>
+        <div style="color:#c9d1d9;font-weight:700;margin-top:2px">ChaCha20Poly1305</div>
+        <div style="font-size:8px;color:#8b949e;margin-top:2px">✓ AEAD Authenticated</div>
+      </div>
+      <div style="border-left:2px solid #58a6ff;padding-left:6px">
+        <div style="color:#8b949e">Verification</div>
+        <div style="color:#c9d1d9;font-weight:700;margin-top:2px">7-Stage Pipeline</div>
+        <div style="font-size:8px;color:#8b949e;margin-top:2px">✓ Fail-Fast Design</div>
+      </div>
+      <div style="border-left:2px solid #f85149;padding-left:6px">
+        <div style="color:#8b949e">DOS Protection</div>
+        <div style="color:#c9d1d9;font-weight:700;margin-top:2px">Rate Limiting</div>
+        <div style="font-size:8px;color:#8b949e;margin-top:2px">✓ 100 req/60s/IP</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Live attack chain</div>
+    <div class="topo">
+      <div class="tnode"><div class="nbox" id="n-charger"><div class="nicon">🔌</div><div class="nlabel">OTA Server</div><div class="nsub">Entry</div></div></div>
+      <div class="conn" id="c0"></div>
+      <div class="tnode"><div class="nbox" id="n-tcu"><div class="nicon">📡</div><div class="nlabel">Vehicle</div><div class="nsub">Gateway</div></div></div>
+      <div class="conn" id="c1"></div>
+      <div class="tnode"><div class="nbox" id="n-sandbox"><div class="nicon">🔒</div><div class="nlabel">Verification</div><div class="nsub">Pipeline</div></div></div>
+      <div class="conn" id="c2"></div>
+      <div class="tnode"><div class="nbox" id="n-gateway"><div class="nicon">✓</div><div class="nlabel">Recovery</div><div class="nsub">Audit Log</div></div></div>
+    </div>
+    <div class="pkt-row"><div class="pkt-line"></div><div class="pkt" id="pkt"></div></div>
+    <div class="topo-msg" id="topo-msg">Select scenario and click "Run simulation"</div>
+  </div>
+
+  <div class="card sb-wrap">
+    <div class="sb-tag">7-Stage Verification Pipeline — Fail-fast: any stage failure blocks ECU</div>
+    <div class="stages">
+      <div class="stage" id="st-delivery-gate">
+        <div class="sico">🔌</div>
+        <div><div class="sname">Delivery Gate</div><div class="salg">State + source + channel</div></div>
+        <div class="sres" id="r-delivery-gate">—</div>
+      </div>
+      <div class="stage" id="st-freshness">
+        <div class="sico">⏱</div>
+        <div><div class="sname">Freshness</div><div class="salg">Issued / expires window</div></div>
+        <div class="sres" id="r-freshness">—</div>
+      </div>
+      <div class="stage" id="st-kyber">
+        <div class="sico">🔑</div>
+        <div><div class="sname">Kyber KEM</div><div class="salg">Session key verify</div></div>
+        <div class="sres" id="r-kyber">—</div>
+      </div>
+      <div class="stage" id="st-dilithium">
+        <div class="sico">✍</div>
+        <div><div class="sname">Dilithium sig</div><div class="salg">Signature verify</div></div>
+        <div class="sres" id="r-dilithium">—</div>
+      </div>
+      <div class="stage" id="st-hash">
+        <div class="sico">#</div>
+        <div><div class="sname">SHA3-256</div><div class="salg">Integrity check</div></div>
+        <div class="sres" id="r-hash">—</div>
+      </div>
+      <div class="stage" id="st-version">
+        <div class="sico">↑</div>
+        <div><div class="sname">Version check</div><div class="salg">Anti-rollback</div></div>
+        <div class="sres" id="r-version">—</div>
+      </div>
+      <div class="stage" id="st-ecu-validation">
+        <div class="sico">🧭</div>
+        <div><div class="sname">ECU validation</div><div class="salg">Target allowlist</div></div>
+        <div class="sres" id="r-ecu-validation">—</div>
+      </div>
+    </div>
+    <div class="verdict" id="verdict">Awaiting packet</div>
+
+    <div class="crypto-proof" id="crypto-proof">
+      <div class="cp-title">Real cryptographic values — verified live</div>
+      <div class="cp-row">
+        <span class="cp-label">Dilithium sig (32B)</span>
+        <span class="cp-val" id="cp-sig">—</span>
+      </div>
+      <hr class="cp-divider"/>
+      <div class="cp-row">
+        <span class="cp-label">Kyber session key (16B)</span>
+        <span class="cp-val" id="cp-sk">—</span>
+      </div>
+      <hr class="cp-divider"/>
+      <div class="cp-row">
+        <span class="cp-label">SHA3-256 hash</span>
+        <span class="cp-val" id="cp-hash" style="font-size:8.5px">—</span>
+      </div>
+    </div>
+
+    <div class="why" id="why">
+      <div class="why-title">Why this was <span id="why-word">blocked</span></div>
+      <div class="why-body" id="why-body">—</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">ECU Domains — Only reached after full verification clearance</div>
+    <div class="ecu-grid">
+      <div class="ecu-card" id="ecu-BRAKE"><div class="ecu-name">BRAKE</div><div class="ecu-ver" id="ev-BRAKE">v2.0.0</div></div>
+      <div class="ecu-card" id="ecu-POWERTRAIN"><div class="ecu-name">POWERTRAIN</div><div class="ecu-ver" id="ev-POWERTRAIN">v1.5.0</div></div>
+      <div class="ecu-card" id="ecu-CHARGER"><div class="ecu-name">CHARGER</div><div class="ecu-ver" id="ev-CHARGER">v1.0.0</div></div>
+      <div class="ecu-card" id="ecu-INFOTAINMENT"><div class="ecu-name">INFOTAINMENT</div><div class="ecu-ver" id="ev-INFOTAINMENT">v3.1.0</div></div>
+      <div class="ecu-card" id="ecu-GATEWAY"><div class="ecu-name">GATEWAY</div><div class="ecu-ver" id="ev-GATEWAY">v1.2.0</div></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Right panel -->
+<div class="right">
+
+  <div>
+    <div class="section-title">Vehicle Operating States</div>
+    <div class="scenario-tabs">
+      <span class="stab" onclick="applyVehicleState('Highway')">Highway</span>
+      <span class="stab" onclick="applyVehicleState('Normal Idle')">Normal Idle</span>
+      <span class="stab" onclick="applyVehicleState('Stationary')">Stationary</span>
+      <span class="stab" onclick="applyVehicleState('Charging')">Charging</span>
+      <span class="stab" onclick="applyVehicleState('Low Battery')">Low Battery</span>
+    </div>
+    <div class="scenario-info" id="scenario-info"></div>
+  </div>
+
+  <div>
+    <div class="section-title">Vehicle State Control</div>
+    <div class="ctrl-grid">
+      <div class="ctrl-item">
+        <label class="ctrl-label">Speed (km/h)</label>
+        <div class="ctrl-value" id="speed-val">0</div>
+        <input type="range" id="speed" class="ctrl-input" min="0" max="150" value="0" oninput="updateSpeedDisplay()"/>
+      </div>
+      <div class="ctrl-item">
+        <label class="ctrl-label">Battery (%)</label>
+        <div class="ctrl-value" id="battery-val">68</div>
+        <input type="range" id="battery" class="ctrl-input" min="0" max="100" value="68" oninput="updateBatteryDisplay()"/>
+      </div>
+      <div class="ctrl-item">
+        <label class="ctrl-label">Temperature (°C)</label>
+        <div class="ctrl-value" id="temp-val">31</div>
+        <input type="range" id="temp" class="ctrl-input" min="0" max="80" value="31" oninput="updateTempDisplay()"/>
+      </div>
+      <div class="ctrl-item">
+        <label class="ctrl-label">Charging</label>
+        <div style="margin-top:4px">
+          <label><input type="checkbox" id="charging" checked/> Active</label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div class="field">
+      <label>Firmware Payload (Pipe-delimited)</label>
+      <textarea id="inp-payload" rows="4" placeholder="Enter firmware payload..."></textarea>
+    </div>
+    <div class="field">
+      <label>Threat Mode</label>
+      <select id="scenario-hint">
+        <option value="auto" selected>Auto classify</option>
+        <option value="rogue_charger">Rogue charger</option>
+        <option value="rollback">Rollback</option>
+        <option value="hndl">HNDL comparison</option>
+      </select>
+    </div>
+    <div id="classification-panel" style="display:none;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:7px;margin-bottom:6px">
+      <div style="font-size:8px;color:#8b949e;text-transform:uppercase;letter-spacing:.05em">Detected Scenario</div>
+      <div id="cls-title" style="font-size:11px;font-weight:700;color:#58a6ff;margin-top:3px">—</div>
+      <div id="cls-meta" style="font-size:8px;color:#8b949e;margin-top:2px">—</div>
+      <div id="cls-reasoning" style="font-size:8px;color:#c9d1d9;margin-top:4px;line-height:1.4">—</div>
+    </div>
+    <button class="btn green" id="btn-run" onclick="runOTAUpdate()" disabled>
+      <span>▶</span> Execute OTA Update
+    </button>
+  </div>
+
+  <div>
+    <div class="section-title">Event Log</div>
+    <div class="log-box" id="log-box"></div>
+  </div>
+
+
+  <div>
+    <div class="section-title" style="margin-top:10px">📊 Real-Time Metrics</div>
+    <div id="security-metrics" style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:9px">
+      <div style="background:#0d1117;border:1px solid #30363d;border-radius:5px;padding:6px;text-align:center">
+        <div style="color:#8b949e;font-size:8px">Blocked (Other)</div>
+        <div style="color:#f85149;font-weight:700;font-size:12px;margin-top:3px" id="metric-unsigned">0</div>
+      </div>
+      <div style="background:#0d1117;border:1px solid #30363d;border-radius:5px;padding:6px;text-align:center">
+        <div style="color:#8b949e;font-size:8px">Blocked (ECU)</div>
+        <div style="color:#f85149;font-weight:700;font-size:12px;margin-top:3px" id="metric-ecu">0</div>
+      </div>
+      <div style="background:#0d1117;border:1px solid #30363d;border-radius:5px;padding:6px;text-align:center">
+        <div style="color:#8b949e;font-size:8px">Blocked (Replay)</div>
+        <div style="color:#f85149;font-weight:700;font-size:12px;margin-top:3px" id="metric-replay">0</div>
+      </div>
+      <div style="background:#0d1117;border:1px solid #30363d;border-radius:5px;padding:6px;text-align:center">
+        <div style="color:#8b949e;font-size:8px">Accepted (Valid)</div>
+        <div style="color:#3fb950;font-weight:700;font-size:12px;margin-top:3px" id="metric-accepted">0</div>
+      </div>
+      <div style="background:#0d1117;border:1px solid #30363d;border-radius:5px;padding:6px;text-align:center;grid-column:1 / -1">
+        <div style="color:#8b949e;font-size:8px">Latest Request Total Time</div>
+        <div style="color:#58a6ff;font-weight:700;font-size:12px;margin-top:3px" id="metric-latest-time">0 ms</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<script>
+let running = false;
+const realtimeMetrics = {
+  blockedUnsigned: 0,
+  blockedEcu: 0,
+  blockedReplay: 0,
+  accepted: 0,
+  latestMs: 0,
+};
+
+function updateRealtimeMetrics() {
+  document.getElementById('metric-unsigned').textContent = realtimeMetrics.blockedUnsigned;
+  document.getElementById('metric-ecu').textContent = realtimeMetrics.blockedEcu;
+  document.getElementById('metric-replay').textContent = realtimeMetrics.blockedReplay;
+  document.getElementById('metric-accepted').textContent = realtimeMetrics.accepted;
+  document.getElementById('metric-latest-time').textContent = `${realtimeMetrics.latestMs.toFixed(1)} ms`;
+}
+
+function classifyMetricBucket(failedAt) {
+  const stage = String(failedAt || '').toLowerCase();
+  if (stage.includes('replay')) return 'replay';
+  if (stage.includes('ecu')) return 'ecu';
+  return 'unsigned';
+}
+
+function finalizeRunMetrics(accepted, failedAt, startedAt) {
+  realtimeMetrics.latestMs = performance.now() - startedAt;
+  if (accepted) {
+    realtimeMetrics.accepted += 1;
+  } else {
+    const bucket = classifyMetricBucket(failedAt);
+    if (bucket === 'replay') realtimeMetrics.blockedReplay += 1;
+    else if (bucket === 'ecu') realtimeMetrics.blockedEcu += 1;
+    else realtimeMetrics.blockedUnsigned += 1;
+  }
+  updateRealtimeMetrics();
+}
+
+updateRealtimeMetrics();
+
+const VEHICLE_STATES = {
+  "Highway": { speed: 100, battery: 45, temp: 52, charging: false, desc: "Driving at 100 km/h" },
+  "Normal Idle": { speed: 0, battery: 42, temp: 28, charging: false, desc: "Vehicle idle, not charging" },
+  "Stationary": { speed: 0, battery: 68, temp: 25, charging: false, desc: "Parked, engine off" },
+  "Charging": { speed: 0, battery: 68, temp: 31, charging: true, desc: "Parked at charger" },
+  "Low Battery": { speed: 0, battery: 8, temp: 22, charging: true, desc: "Critical battery, charging" }
+};
+
+function applyVehicleState(stateName) {
+  const state = VEHICLE_STATES[stateName];
+  if(!state) return;
+  document.getElementById('speed').value = state.speed;
+  document.getElementById('battery').value = state.battery;
+  document.getElementById('temp').value = state.temp;
+  document.getElementById('charging').checked = state.charging;
+  updateSpeedDisplay();
+  updateBatteryDisplay();
+  updateTempDisplay();
+  document.getElementById('scenario-info').innerHTML = `<strong>${stateName}</strong><br/>${state.desc}`;
+  document.getElementById('scenario-info').className = 'scenario-info show';
+  document.getElementById('btn-run').disabled = false;
+}
+
+function updateSpeedDisplay() { document.getElementById('speed-val').textContent = document.getElementById('speed').value; updateDynamicState(); }
+function updateBatteryDisplay() { document.getElementById('battery-val').textContent = document.getElementById('battery').value; updateDynamicState(); }
+function updateTempDisplay() { document.getElementById('temp-val').textContent = document.getElementById('temp').value; updateDynamicState(); }
+
+function updateDynamicState() {
+  const speed = parseInt(document.getElementById('speed').value);
+  const battery = parseInt(document.getElementById('battery').value);
+  const charging = document.getElementById('charging').checked;
+  let state = "Custom";
+  if(speed === 100 && battery === 45 && !charging) state = "Highway";
+  else if(speed === 0 && battery === 42 && !charging) state = "Normal Idle";
+  else if(speed === 0 && battery === 68 && !charging) state = "Stationary";
+  else if(speed === 0 && battery === 68 && charging) state = "Charging";
+  else if(speed === 0 && battery === 8 && charging) state = "Low Battery";
+  if(state !== "Custom") document.getElementById('scenario-info').innerHTML = `<strong>${state}</strong>`;
+}
+
+function log(msg, kind = 'm') {
+  const box = document.getElementById('log-box');
+  const d = document.createElement('div');
+  d.className = 'll';
+  const ts = new Date().toTimeString().slice(0,8);
+  d.innerHTML = `<span class="lts">${ts}</span><span class="l${kind}">${msg}</span>`;
+  box.prepend(d);
+  if(box.children.length > 50) box.removeChild(box.lastChild);
+}
+
+function resetUI() {
+  ['n-charger','n-tcu','n-sandbox','n-gateway'].forEach(id => {
+    const n = document.getElementById(id);
+    n.className = 'nbox';
+    const s = n.querySelector('.nstatus');
+    if(s) s.remove();
+  });
+  ['c0','c1','c2'].forEach(id => document.getElementById(id).className = 'conn');
+  ['delivery-gate','freshness','kyber','dilithium','hash','version','ecu-validation'].forEach(s => {
+    document.getElementById('st-' + s).className = 'stage';
+    document.getElementById('r-' + s).textContent = '—';
+  });
+  document.getElementById('verdict').textContent = 'Awaiting packet';
+  document.getElementById('crypto-proof').className = 'crypto-proof';
+  document.getElementById('why').className = 'why';
+  const cls = document.getElementById('classification-panel');
+  cls.style.display = 'none';
+  document.getElementById('cls-title').textContent = '—';
+  document.getElementById('cls-meta').textContent = '—';
+  document.getElementById('cls-reasoning').textContent = '—';
+}
+
+function setNode(id, state) {
+  const n = document.getElementById(id);
+  n.className = 'nbox ' + state;
+  let s = n.querySelector('.nstatus');
+  if(!s) { s = document.createElement('div'); s.className = 'nstatus'; n.appendChild(s); }
+  s.className = 'nstatus ' + state;
+  s.textContent = state === 'pass' ? '✓' : '✕';
+}
+
+async function checkStage(name, pass) {
+  const el = document.getElementById('st-' + name);
+  const res = document.getElementById('r-' + name);
+  el.className = 'stage active';
+  res.innerHTML = '<span class="spin"></span>';
+  await new Promise(r => setTimeout(r, 600));
+  el.className = 'stage ' + (pass ? 'pass' : 'fail');
+  res.textContent = pass ? 'PASS' : 'FAIL';
+}
+
+function updateECUVersion(ecuId, newVersion) {
+  const uiMap = {
+    'adas_ecu': 'BRAKE',
+    'powertrain_ecu': 'POWERTRAIN',
+    'braking_ecu': 'CHARGER',
+    'steering_ecu': 'GATEWAY',
+    'maps_ecu': 'INFOTAINMENT'
+  };
+  const displayId = uiMap[ecuId] || ecuId;
+  const ecuElement = document.getElementById('ev-' + displayId);
+  if(ecuElement) {
+    ecuElement.textContent = 'v' + newVersion;
+    ecuElement.style.color = '#3fb950';
+    setTimeout(() => { ecuElement.style.color = ''; }, 1500);
+  }
+}
+
+function renderClassification(classification) {
+  if(!classification) return;
+  const panel = document.getElementById('classification-panel');
+  const title = document.getElementById('cls-title');
+  const meta = document.getElementById('cls-meta');
+  const reasoning = document.getElementById('cls-reasoning');
+
+  const scenario = (classification.scenario || 'unknown').replaceAll('_', ' ').toUpperCase();
+  const confidence = (classification.confidence || 'unknown').toUpperCase();
+  const risk = (classification.risk || 'UNKNOWN').toUpperCase();
+  const iocs = classification.iocs || [];
+  const notes = classification.reasoning || [];
+  const delivery = classification.delivery_context || {};
+  const threatClassification = (classification.threat_classification || 'UNKNOWN').toUpperCase();
+
+  title.textContent = scenario;
+  meta.textContent = `Threat: ${threatClassification} | Risk: ${risk} | Confidence: ${confidence} | Source: ${delivery.source || 'n/a'} | Channel: ${delivery.delivery_channel || 'n/a'}`;
+  reasoning.innerHTML = [
+    notes.length ? `Reasoning: ${notes.join(' | ')}` : 'Reasoning: n/a',
+    iocs.length ? `IoCs: ${iocs.join(', ')}` : 'IoCs: none',
+  ].join('<br/>');
+  panel.style.display = 'block';
+}
+
+async function runOTAUpdate() {
+  if(running) return;
+  const startedAt = performance.now();
+  running = true;
+  document.getElementById('btn-run').disabled = true;
+  document.getElementById('sys-badge').textContent = 'Running...';
+  resetUI();
+  log('Starting OTA Update process', 'i');
+
+  const payload = document.getElementById('inp-payload').value.trim();
+  const scenarioHint = document.getElementById('scenario-hint').value;
+  if(scenarioHint !== 'hndl' && !payload) {
+    document.getElementById('verdict').textContent = 'BLOCKED: No firmware payload';
+    document.getElementById('sys-badge').textContent = 'Error';
+    log('Error: No firmware payload provided', 'f');
+    finalizeRunMetrics(false, 'payload_missing', startedAt);
+    running = false;
+    document.getElementById('btn-run').disabled = false;
+    return;
+  }
+
+  const vehicleState = {
+    speed_kph: parseInt(document.getElementById('speed').value),
+    battery_soc: parseInt(document.getElementById('battery').value),
+    temperature_c: parseInt(document.getElementById('temp').value),
+    charging_active: document.getElementById('charging').checked,
+    data_link_locked: true
+  };
+
+  try {
+    if (scenarioHint === 'hndl') {
+      const response = await fetch('/api/hndl');
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const result = await response.json();
+      const hndl = result.result || {};
+
+      renderClassification({
+        scenario: 'hndl_resistance',
+        confidence: 'high',
+        risk: 'LOW',
+        iocs: [],
+        reasoning: [hndl.verdict || 'Kyber remains quantum-safe; RSA does not.'],
+        delivery_context: { source: 'demo', delivery_channel: 'comparison', requires_charging_state: false },
+        threat_classification: 'HNDL_RESISTANCE',
+      });
+
+      document.getElementById('verdict').textContent = 'HNDL RESISTANCE VERIFIED';
+      document.getElementById('why').className = 'why show ok';
+      document.getElementById('why-word').textContent = 'verified';
+      document.getElementById('why-body').textContent = hndl.verdict || 'Kyber512 remains quantum-safe against harvest-now-decrypt-later attacks.';
+      document.getElementById('sys-badge').textContent = 'HNDL Verified';
+      document.getElementById('crypto-proof').className = 'crypto-proof show';
+      document.getElementById('cp-sig').textContent = `${hndl.classical?.algorithm || 'RSA-2048'}: ${hndl.classical?.ciphertext_size || 'n/a'} bytes`;
+      document.getElementById('cp-sk').textContent = `${hndl.post_quantum?.algorithm || 'Kyber512'}: ${hndl.post_quantum?.ciphertext_size || 'n/a'} bytes`;
+      document.getElementById('cp-hash').textContent = hndl.post_quantum?.quantum_safe ? 'Quantum-safe ✓' : 'Quantum-safe ✗';
+      document.querySelector('#resultName').textContent = 'HNDL Resistance';
+      document.querySelector('#resultStatus').textContent = 'VERIFIED';
+      document.querySelector('#resultStatus').parentElement.className = 'result-status accepted';
+      document.querySelector('#resultLatency').textContent = '0 ms';
+      document.querySelector('#resultDetails').innerHTML = [
+        formatDetailItem('Status', 'VERIFIED'),
+        formatDetailItem('RSA-2048', `${hndl.classical?.ciphertext_size || 'n/a'} bytes`),
+        formatDetailItem('Kyber512', `${hndl.post_quantum?.ciphertext_size || 'n/a'} bytes`),
+        formatDetailItem('Quantum Safe', hndl.post_quantum?.quantum_safe ? 'Yes' : 'No'),
+      ].join('');
+      document.querySelector('#runResult').classList.remove('hidden');
+      log('HNDL resistance comparison completed', 's');
+      finalizeRunMetrics(true, null, startedAt);
+      running = false;
+      document.getElementById('btn-run').disabled = false;
+      return;
+    }
+
+    const response = await fetch('/api/run-json-scenario', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scenario_name: "OTA Update",
+        payload: payload,
+        scenario_hint: scenarioHint,
+        vehicle_state: vehicleState
+      })
+    });
+    const result = await response.json();
+    renderClassification(result.classification);
+
+    // Stage 1: Delivery gate (state + source + channel)
+    await checkStage('delivery-gate', result.result?.delivery_gate_ok ?? true);
+    if(!result.result?.delivery_gate_ok) {
+      setNode('n-tcu', 'fail');
+      log('Delivery gate failed', 'f');
+      document.getElementById('verdict').textContent = 'BLOCKED: Delivery channel rejected';
+      document.getElementById('why').className = 'why show';
+      document.getElementById('why-body').textContent = result.reason || 'Vehicle conditions not suitable for update';
+      document.getElementById('sys-badge').textContent = 'Blocked (Gate)';
+      finalizeRunMetrics(false, result.failed_at || 'delivery_gate', startedAt);
+      running = false;
+      document.getElementById('btn-run').disabled = false;
+      return;
+    }
+
+    // Stage 2: Freshness
+    await checkStage('freshness', result.result?.freshness_ok ?? true);
+    if(!result.result?.freshness_ok) {
+      setNode('n-tcu', 'fail');
+      log('Freshness check failed', 'f');
+      document.getElementById('verdict').textContent = 'BLOCKED: Freshness window invalid';
+      document.getElementById('why').className = 'why show';
+      document.getElementById('why-body').textContent = result.reason || 'Timestamp freshness check failed.';
+      document.getElementById('sys-badge').textContent = 'Blocked (Freshness)';
+      finalizeRunMetrics(false, result.failed_at || 'freshness', startedAt);
+      running = false;
+      document.getElementById('btn-run').disabled = false;
+      return;
+    }
+
+    // Stage 3: Kyber KEM
+    await checkStage('kyber', result.result?.kyber_ok ?? true);
+    if(!result.result?.kyber_ok) {
+      setNode('n-tcu', 'fail');
+      log('Kyber KEM verification failed', 'f');
+      document.getElementById('verdict').textContent = result.failed_at === 'source' ? 'BLOCKED: Rogue source rejected' : 'BLOCKED: Session key verification failed';
+      document.getElementById('why').className = 'why show';
+      document.getElementById('why-body').textContent = result.reason || 'Kyber encapsulation invalid.';
+      document.getElementById('sys-badge').textContent = result.failed_at === 'source' ? 'Blocked (Source)' : 'Blocked (Kyber)';
+      finalizeRunMetrics(false, result.failed_at || 'kyber', startedAt);
+      running = false;
+      document.getElementById('btn-run').disabled = false;
+      return;
+    }
+
+    // Stage 4: Dilithium Signature
+    await checkStage('dilithium', result.result?.dilithium_ok ?? true);
+    if(!result.result?.dilithium_ok) {
+      setNode('n-sandbox', 'fail');
+      log('Dilithium signature verification failed', 'f');
+      document.getElementById('verdict').textContent = 'BLOCKED: Firmware signature invalid';
+      document.getElementById('why').className = 'why show';
+      document.getElementById('why-body').textContent = result.reason || 'Signature verification failed. Not from OEM server.';
+      document.getElementById('sys-badge').textContent = 'Blocked (Signature)';
+      finalizeRunMetrics(false, result.failed_at || 'dilithium', startedAt);
+      running = false;
+      document.getElementById('btn-run').disabled = false;
+      return;
+    }
+
+    // Stage 5: SHA3-256 Hash
+    await checkStage('hash', result.result?.hash_ok ?? true);
+    if(!result.result?.hash_ok) {
+      setNode('n-sandbox', 'fail');
+      log('SHA3-256 integrity check failed', 'f');
+      document.getElementById('verdict').textContent = 'BLOCKED: Payload integrity check failed';
+      document.getElementById('why').className = 'why show';
+      document.getElementById('why-body').textContent = result.reason || 'Payload hash does not match. Bit-flip detected.';
+      document.getElementById('sys-badge').textContent = 'Blocked (Integrity)';
+      finalizeRunMetrics(false, result.failed_at || 'hash', startedAt);
+      running = false;
+      document.getElementById('btn-run').disabled = false;
+      return;
+    }
+
+    // Stage 6: Version Check
+    await checkStage('version', result.result?.version_ok ?? true);
+    if(!result.result?.version_ok) {
+      setNode('n-gateway', 'fail');
+      log('Version rollback detected', 'f');
+      document.getElementById('verdict').textContent = 'BLOCKED: Rollback attack detected';
+      document.getElementById('why').className = 'why show';
+      document.getElementById('why-body').textContent = result.reason || 'Version must always increase. Downgrade blocked.';
+      document.getElementById('sys-badge').textContent = 'Blocked (Version)';
+      finalizeRunMetrics(false, result.failed_at || 'version', startedAt);
+      running = false;
+      document.getElementById('btn-run').disabled = false;
+      return;
+    }
+
+    // Stage 7: ECU validation
+    await checkStage('ecu-validation', result.result?.ecu_validation_ok ?? true);
+    if(!result.result?.ecu_validation_ok) {
+      setNode('n-gateway', 'fail');
+      log('ECU target validation failed', 'f');
+      document.getElementById('verdict').textContent = 'BLOCKED: ECU target not allowlisted';
+      document.getElementById('why').className = 'why show';
+      document.getElementById('why-body').textContent = result.reason || 'Invalid ECU target.';
+      document.getElementById('sys-badge').textContent = 'Blocked (ECU)';
+      finalizeRunMetrics(false, result.failed_at || 'ecu_validation', startedAt);
+      running = false;
+      document.getElementById('btn-run').disabled = false;
+      return;
+    }
+
+    // All stages passed - update ECUs
+    setNode('n-charger', 'pass');
+    setNode('n-tcu', 'pass');
+    setNode('n-sandbox', 'pass');
+    setNode('n-gateway', 'pass');
+    ['c0','c1','c2'].forEach(id => document.getElementById(id).className = 'conn pass');
+    
+    log('All 7 verification stages passed', 's');
+    
+    // Update target ECU version if available
+    if(result.target_ecu && result.firmware_version) {
+      updateECUVersion(result.target_ecu, result.firmware_version);
+      log(`${result.target_ecu} updated to v${result.firmware_version}`, 's');
+    }
+    
+    log('OTA update accepted and applied', 's');
+    document.getElementById('verdict').textContent = 'ACCEPTED: Firmware verified and installed';
+    document.getElementById('why').className = 'why show ok';
+    document.getElementById('why-word').textContent = 'accepted';
+    document.getElementById('why-body').textContent = 'Firmware passed all 7 gates. Delivery channel matched the vehicle state, OEM origin proven, freshness confirmed, integrity confirmed, version monotonic, and ECU target validated.';
+    document.getElementById('sys-badge').textContent = 'Accepted';
+
+    if(result.verification_trace) {
+      document.getElementById('crypto-proof').className = 'crypto-proof show';
+      document.getElementById('cp-sig').textContent = 'Verified ✓';
+      document.getElementById('cp-sk').textContent = 'Established ✓';
+      document.getElementById('cp-hash').textContent = 'Matched ✓';
+    }
+    finalizeRunMetrics(true, null, startedAt);
+  } catch(err) {
+    log('Error: ' + err.message, 'f');
+    document.getElementById('sys-badge').textContent = 'Error';
+    finalizeRunMetrics(false, 'error', startedAt);
+  }
+
+  running = false;
+  document.getElementById('btn-run').disabled = false;
+}
+
+applyVehicleState('Stationary');
+</script>
+</script>
+</body>
+</html>

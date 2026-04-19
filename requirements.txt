@@ -1,7 +1,8 @@
-oqs
+liboqs-python
 flask
 flask-socketio
 pyzmq
 cryptography
 pyyaml
 pytest
+python-socketio

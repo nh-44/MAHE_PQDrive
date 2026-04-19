@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  # Dashboard Service - REST API + WebSocket server
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pqdrive-dashboard
+    environment:
+      - FLASK_ENV=production
+      - PYTHONPATH=/app
+      - LOG_LEVEL=INFO
+    ports:
+      - "5000:5000"
+    volumes:
+      # Mount for persistent audit logs and replay tracking
+      - ./audit_logs.jsonl:/app/audit_logs.jsonl
+      - ./audit_keys.json:/app/audit_keys.json
+      - ./gateway_replay_log.db:/app/gateway_replay_log.db
+      - ./config:/app/config
+    networks:
+      - pqdrive
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - db
+
+  # SQLite Database Volume Service (for persistent storage)
+  db:
+    image: busybox:latest
+    container_name: pqdrive-db-volume
+    volumes:
+      - db-volume:/data
+    networks:
+      - pqdrive
+    command: sh -c "echo 'Database volume initialized' && tail -f /dev/null"
+
+  # Optional: Gateway Service (if running as separate container)
+  # Uncomment to deploy vehicle gateway as separate container
+  #
+  # gateway:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: pqdrive-gateway
+  #   environment:
+  #     - PYTHONPATH=/app
+  #     - GATEWAY_MODE=true
+  #     - VEHICLE_ID=BRAKE_ECU_001
+  #   volumes:
+  #     - ./gateway_replay_log.db:/app/gateway_replay_log.db
+  #     - ./audit_logs.jsonl:/app/audit_logs.jsonl
+  #   networks:
+  #     - pqdrive
+  #   depends_on:
+  #     - dashboard
+
+volumes:
+  db-volume:
+
+networks:
+  pqdrive:
+    driver: bridge
