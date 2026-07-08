@@ -1,40 +1,33 @@
-"""ZeroMQ-based CAN bus simulation for inter-process messaging."""
-
-from __future__ import annotations
-
-import json
-
-import zmq
-
+import time
 
 class CANBus:
-	"""Simple PUB/SUB wrapper to simulate CAN-style topic messaging."""
+    """
+    Minimal CAN bus simulator.
+    In a real vehicle, ECU domain controllers communicate over CAN/CAN-FD.
+    Here we model message passing so the dashboard can visualise bus traffic.
+    """
 
-	def __init__(self, pub_port: int = 5555, sub_port: int = 5556) -> None:
-		self.context = zmq.Context()
-		self.pub_port = pub_port
-		self.sub_port = sub_port
+    def __init__(self):
+        self.messages = []   # list of dicts — full audit trail
 
-		self.pub_socket = self.context.socket(zmq.PUB)
-		self.pub_socket.bind(f"tcp://127.0.0.1:{self.pub_port}")
+    def send(self, sender: str, receiver: str, msg_type: str, data: dict) -> dict:
+        frame = {
+            "timestamp": time.time(),
+            "sender":    sender,
+            "receiver":  receiver,
+            "type":      msg_type,
+            "data":      data,
+        }
+        self.messages.append(frame)
+        return frame
 
-		self.sub_socket = self.context.socket(zmq.SUB)
-		self.sub_socket.connect(f"tcp://127.0.0.1:{self.pub_port}")
+    def broadcast(self, sender: str, msg_type: str, data: dict) -> dict:
+        return self.send(sender, "BROADCAST", msg_type, data)
 
-	def publish(self, topic: str, message: dict) -> None:
-		"""Publish one topic-scoped JSON message on the simulated bus."""
-		payload = json.dumps(message)
-		self.pub_socket.send_string(f"{topic} {payload}")
+    def get_log(self, msg_type: str = None) -> list:
+        if msg_type is None:
+            return self.messages
+        return [m for m in self.messages if m["type"] == msg_type]
 
-	def subscribe(self, topic: str) -> dict:
-		"""Subscribe to one topic and receive a single JSON message."""
-		self.sub_socket.setsockopt_string(zmq.SUBSCRIBE, topic)
-		raw = self.sub_socket.recv_string()
-		_, payload = raw.split(" ", 1)
-		return json.loads(payload)
-
-	def close(self) -> None:
-		"""Close sockets and terminate ZeroMQ context."""
-		self.pub_socket.close(0)
-		self.sub_socket.close(0)
-		self.context.term()
+    def clear(self):
+        self.messages = []

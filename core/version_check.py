@@ -1,15 +1,19 @@
-"""Version checking utilities to block rollback OTA attacks."""
-
-from __future__ import annotations
-
-
-def get_version_tuple(version_str: str) -> tuple[int, ...]:
-	"""Convert a semantic version string (e.g. 1.2.3) to an int tuple."""
-	return tuple(int(part) for part in version_str.strip().split("."))
+def get_version_tuple(version_str: str) -> tuple:
+    """
+    Convert a semantic version string to a tuple of ints.
+    e.g. "1.2.3" → (1, 2, 3)
+    """
+    try:
+        return tuple(int(x) for x in version_str.strip().split("."))
+    except ValueError:
+        raise ValueError(f"Invalid version format: '{version_str}' — expected format like '1.2.3'")
 
 
 def is_valid_version(current_version: str, incoming_version: str) -> bool:
-	"""Return True only when incoming version is strictly newer than current."""
-	current_tuple = get_version_tuple(current_version)
-	incoming_tuple = get_version_tuple(incoming_version)
-	return incoming_tuple > current_tuple
+    """
+    Returns True only if incoming_version is strictly greater than current_version.
+    Equal or lower versions are rejected to prevent rollback attacks.
+    """
+    current = get_version_tuple(current_version)
+    incoming = get_version_tuple(incoming_version)
+    return incoming > current

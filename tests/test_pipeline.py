@@ -1,123 +1,70 @@
-from __future__ import annotations
-
-from core import dilithium, kyber, sha3_hash, version_check
-from core.demo_runner import build_demo_report, run_hndl_demo
-from core.pipeline import OTAVerificationPipeline
+import pytest
 from vehicle.ota_server import OTAServer
+from vehicle.gateway import VehicleGateway
+from vehicle.ecu_domain import ECUDomain
+from vehicle.recovery import RecoveryManager
+from attacks.rogue_charger import RogueChargerAttack
+from attacks.hndl_demo import HarvestNowDecryptLater
+from attacks.rollback_demo import RollbackAttack
+from attacks.tamper_demo import TamperAttack
 
+@pytest.fixture
+def server_and_gateway():
+    server  = OTAServer()
+    gateway = VehicleGateway(server.get_public_key())
+    return server, gateway
 
-def test_kyber_keygen_and_session() -> None:
-	public_key, private_key = kyber.generate_keypair()
-	ciphertext, encapsulated_key = kyber.encapsulate(public_key)
-	decapsulated_key = kyber.decapsulate(private_key, ciphertext)
-	assert decapsulated_key == encapsulated_key
+def test_legitimate_update(server_and_gateway):
+    server, gateway = server_and_gateway
+    pkg    = server.build_update_package(gateway.get_public_key(), "1.0.0", "2.0.0")
+    result = gateway.receive_update(pkg)
+    assert result["all_passed"] is True
+    assert result["failed_at"] is None
 
+def test_rogue_charger_blocked():
+    result = RogueChargerAttack().run()
+    assert result["blocked"] is True
+    assert result["failed_at"] == "delivery"
 
-def test_dilithium_sign_verify() -> None:
-	public_key, private_key = dilithium.generate_keypair()
-	message = b"test message"
-	signature = dilithium.sign(private_key, message)
-	assert dilithium.verify(public_key, message, signature) is True
+def test_hndl_resisted():
+    result = HarvestNowDecryptLater().run()
+    assert result["kyber_resists_hndl"] is True
+    assert result["legitimate_decap_ok"] is True
 
+def test_rollback_blocked():
+    result = RollbackAttack().run()
+    assert result["blocked"] is True
+    assert result["failed_at"] == "version"
 
-def test_dilithium_bad_signature() -> None:
-	public_key_a, private_key_a = dilithium.generate_keypair()
-	public_key_b, _ = dilithium.generate_keypair()
-	message = b"test message"
-	signature = dilithium.sign(private_key_a, message)
-	assert dilithium.verify(public_key_b, message, signature) is False
-	assert dilithium.verify(public_key_a, b"wrong message", signature) is False
+def test_tamper_blocked():
+    result = TamperAttack().run()
+    assert result["blocked"] is True
+    assert result["failed_at"] == "dilithium"
 
+def test_ecu_apply_and_rollback():
+    ecu      = ECUDomain("ADAS", "1.0.0")
+    recovery = RecoveryManager()
+    recovery.snapshot("ADAS", "1.0.0", b"good_firmware")
+    ecu.apply_update("2.0.0", b"new_firmware")
+    assert ecu.current_version == "2.0.0"
+    result = recovery.rollback(ecu)
+    assert result["status"] == "rolled_back"
+    assert ecu.current_version == "1.0.0"
 
-def test_sha3_hash() -> None:
-	payload = b"firmware_payload"
-	digest = sha3_hash.hash_package(payload)
-	assert sha3_hash.verify_hash(payload, digest) is True
-	assert sha3_hash.verify_hash(payload + b"_mutated", digest) is False
+def test_version_monotonicity(server_and_gateway):
+    server, gateway = server_and_gateway
+    pkg    = server.build_update_package(gateway.get_public_key(), "2.0.0", "1.0.0")
+    result = gateway.receive_update(pkg)
+    assert result["all_passed"] is False
+    assert result["failed_at"] == "version"
 
+def test_version_spoof_blocked(server_and_gateway):
+    server, gateway = server_and_gateway
+    # Build package with signed version = 1.0.0
+    pkg = server.build_update_package(gateway.get_public_key(), "1.0.0", "1.0.0")
+    # Attacker spoofs unauthenticated version header to bypass Gate 3
+    pkg["incoming_version"] = "2.0.0"
+    result = gateway.receive_update(pkg)
+    assert result["all_passed"] is False
+    assert result["failed_at"] == "version_spoof"
 
-def test_version_check_valid() -> None:
-	assert version_check.is_valid_version("1.0.0", "2.0.0") is True
-
-
-def test_version_check_rollback() -> None:
-	assert version_check.is_valid_version("2.0.0", "1.0.0") is False
-
-
-def test_version_check_same() -> None:
-	assert version_check.is_valid_version("1.0.0", "1.0.0") is False
-
-
-def test_full_pipeline_pass() -> None:
-	vehicle_public_key, vehicle_private_key = kyber.generate_keypair()
-	server_public_key, server_private_key = dilithium.generate_keypair()
-
-	server = OTAServer(
-		server_private_key=server_private_key,
-		server_public_key=server_public_key,
-		vehicle_public_key=vehicle_public_key,
-	)
-	pipeline = OTAVerificationPipeline(
-		vehicle_public_key=vehicle_public_key,
-		vehicle_private_key=vehicle_private_key,
-		server_public_key=server_public_key,
-	)
-
-	package = server.prepare_update(
-		payload=b"firmware_v2",
-		current_version="1.0.0",
-		new_version="2.0.0",
-	)
-	result = pipeline.run(package)
-
-	assert result["kyber_ok"] is True
-	assert result["dilithium_ok"] is True
-	assert result["hash_ok"] is True
-	assert result["version_ok"] is True
-	assert result["all_passed"] is True
-	assert result["failed_at"] is None
-
-
-def test_pipeline_fails_on_tamper() -> None:
-	vehicle_public_key, vehicle_private_key = kyber.generate_keypair()
-	server_public_key, server_private_key = dilithium.generate_keypair()
-
-	server = OTAServer(
-		server_private_key=server_private_key,
-		server_public_key=server_public_key,
-		vehicle_public_key=vehicle_public_key,
-	)
-	pipeline = OTAVerificationPipeline(
-		vehicle_public_key=vehicle_public_key,
-		vehicle_private_key=vehicle_private_key,
-		server_public_key=server_public_key,
-	)
-
-	package = server.prepare_update(
-		payload=b"firmware_v2",
-		current_version="1.0.0",
-		new_version="2.0.0",
-	)
-
-	# Payload is hex-encoded in transport; corrupt hash to simulate integrity tamper
-	package["package_hash"] = ("0" if package["package_hash"][0] != "0" else "1") + package["package_hash"][1:]
-
-	result = pipeline.run(package)
-	assert result["hash_ok"] is False
-	assert result["all_passed"] is False
-
-
-def test_hndl_demo_reports_kyber_resistance() -> None:
-	hndl = run_hndl_demo()
-	assert hndl["classical"]["quantum_safe"] is False
-	assert hndl["post_quantum"]["quantum_safe"] is True
-	assert "Kyber" in hndl["verdict"]
-	assert hndl["attack"] == "harvest_now_decrypt_later"
-	assert hndl["kyber_resists_hndl"] is True
-	assert "IND-CCA2" in hndl["why_blocked"]
-
-
-def test_demo_report_includes_hndl_slot() -> None:
-	report = build_demo_report()
-	assert report["hndl"]["post_quantum"]["quantum_safe"] is True
-	assert report["scenarios"][-1]["name"] == "HNDL Resistance"

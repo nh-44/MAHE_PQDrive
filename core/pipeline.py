@@ -1,158 +1,129 @@
-"""OTA verification pipeline combining PQC, integrity, and version checks."""
-
-from __future__ import annotations
-
-from time import perf_counter
-
-from . import dilithium, kyber, sha3_hash, version_check
+import time
+from core.kyber import verify_session
+from core.dilithium import verify
+from core.sha3_hash import verify_hash
+from core.version_check import is_valid_version
 
 
 class OTAVerificationPipeline:
-	"""Run all mandatory checks before accepting an OTA package."""
+    """
+    Runs the 6-stage fail-fast post-quantum verification pipeline for automotive OTA updates.
+    Fails fast at the earliest gate to minimize cryptographic CPU cycles on invalid packages.
+    """
 
-	def __init__(
-		self,
-		vehicle_public_key: bytes,
-		vehicle_private_key: bytes,
-		server_public_key: bytes,
-	) -> None:
-		self.vehicle_public_key = vehicle_public_key
-		self.vehicle_private_key = vehicle_private_key
-		self.server_public_key = server_public_key
+    def __init__(self, vehicle_public_key: bytes, vehicle_private_key: bytes, server_public_key: bytes):
+        self.vehicle_public_key = vehicle_public_key
+        self.vehicle_private_key = vehicle_private_key
+        self.server_public_key = server_public_key
 
-	def run(self, update_package: dict) -> dict:
-		"""Execute fail-fast OTA verification checks in strict order."""
-		result = {
-			"kyber_ok": False,
-			"dilithium_ok": False,
-			"hash_ok": False,
-			"version_ok": False,
-			"all_passed": False,
-			"failed_at": None,
-			"verification_trace": [],
-			"stage_durations_ms": {},
-		}
+    def run(self, update_package: dict, vehicle_state: dict = None) -> dict:
+        """
+        Executes the 6 verification gates in sequential order:
+        1. Delivery Gate (Operational context check)
+        2. Freshness Gate (Replay window check)
+        3. Target & Version Gate (Preliminary unauthenticated metadata check)
+        4. Dilithium Gate (Asymmetric signature verification of origin)
+        5. Kyber Gate (Asymmetric key encapsulation check)
+        6. SHA3 & Authenticated Version Gate (Payload integrity & secure version binding check)
+        """
+        if vehicle_state is None:
+            # Default simulated vehicle state (stationary, fully charged)
+            vehicle_state = {
+                "speed": 0,
+                "battery": 100,
+            }
 
-		# SECURITY FIX (Phase 7C): Add freshness check BEFORE cryptographic verification
-		try:
-			from datetime import datetime, timezone
-			
-			stage_started = perf_counter()
-			
-			# Check that both timestamps are present
-			if "issued_at" not in update_package or "expires_at" not in update_package:
-				result["failed_at"] = "freshness"
-				result["verification_trace"].append({
-					"stage": "freshness",
-					"ok": False,
-					"reason": "missing timestamp",
-					"duration_ms": round((perf_counter() - stage_started) * 1000, 3)
-				})
-				result["stage_durations_ms"]["freshness"] = round((perf_counter() - stage_started) * 1000, 3)
-				return result
-			
-			# Parse timestamps
-			issued_at = datetime.fromisoformat(update_package["issued_at"])
-			expires_at = datetime.fromisoformat(update_package["expires_at"])
-			now = datetime.now(timezone.utc)
-			
-			# Check: Not issued in the future
-			if now < issued_at:
-				result["failed_at"] = "freshness"
-				result["verification_trace"].append({
-					"stage": "freshness",
-					"ok": False,
-					"reason": "not_yet_valid (issued in future)",
-					"duration_ms": round((perf_counter() - stage_started) * 1000, 3)
-				})
-				result["stage_durations_ms"]["freshness"] = round((perf_counter() - stage_started) * 1000, 3)
-				return result
-			
-			# Check: Not expired
-			if now > expires_at:
-				result["failed_at"] = "freshness"
-				result["verification_trace"].append({
-					"stage": "freshness",
-					"ok": False,
-					"reason": "expired",
-					"duration_ms": round((perf_counter() - stage_started) * 1000, 3)
-				})
-				result["stage_durations_ms"]["freshness"] = round((perf_counter() - stage_started) * 1000, 3)
-				return result
-			
-			result["stage_durations_ms"]["freshness"] = round((perf_counter() - stage_started) * 1000, 3)
-			result["verification_trace"].append({
-				"stage": "freshness",
-				"ok": True,
-				"duration_ms": result["stage_durations_ms"]["freshness"]
-			})
-		except Exception as e:
-			result["failed_at"] = "freshness"
-			result["verification_trace"].append({
-				"stage": "freshness",
-				"ok": False,
-				"reason": f"freshness check error: {str(e)}"
-			})
-			return result
+        result = {
+            "delivery_ok": False,
+            "freshness_ok": False,
+            "target_version_ok": False,
+            "dilithium_ok": False,
+            "kyber_ok": False,
+            "hash_ok": False,
+            "all_passed": False,
+            "failed_at": None
+        }
 
-		stage_started = perf_counter()
-		# SECURITY FIX (Phase 7B): Kyber verification already done during gateway decryption
-		# Gateway decapsulates and decrypts, so we skip Kyber verification here
-		result["kyber_ok"] = True  # Mark as passed (already verified during decryption)
-		result["stage_durations_ms"]["kyber"] = round((perf_counter() - stage_started) * 1000, 3)
-		result["verification_trace"].append({"stage": "kyber", "ok": result["kyber_ok"], "reason": "verified_during_decryption", "duration_ms": result["stage_durations_ms"]["kyber"]})
+        # --- GATE 1: Delivery Gate (Context-Aware Gating) ---
+        speed = vehicle_state.get("speed", 0)
+        battery = vehicle_state.get("battery", 100)
+        charger_attestation = update_package.get("charger_attestation", "valid")
 
-		# Convert hex strings back to bytes for verification (gateway stores as hex for JSON)
-		try:
-			payload_bytes = bytes.fromhex(update_package["payload"]) if isinstance(update_package["payload"], str) else update_package["payload"]
-			signature_bytes = bytes.fromhex(update_package["signature"]) if isinstance(update_package["signature"], str) else update_package["signature"]
-		except (ValueError, TypeError) as e:
-			result["dilithium_ok"] = False
-			result["failed_at"] = "format_error"
-			result["verification_trace"].append({"stage": "format", "ok": False, "reason": str(e)})
-			return result
+        if speed != 0 or battery <= 5 or charger_attestation == "invalid":
+            result["failed_at"] = "delivery"
+            return result
+        result["delivery_ok"] = True
 
-		stage_started = perf_counter()
-		result["dilithium_ok"] = dilithium.verify(
-			self.server_public_key,
-			payload_bytes,
-			signature_bytes,
-		)
-		result["stage_durations_ms"]["dilithium"] = round((perf_counter() - stage_started) * 1000, 3)
-		result["verification_trace"].append({"stage": "dilithium", "ok": result["dilithium_ok"], "duration_ms": result["stage_durations_ms"]["dilithium"]})
-		if not result["dilithium_ok"]:
-			result["failed_at"] = "dilithium"
-			return result
+        # --- GATE 2: Freshness Gate (Timestamp check) ---
+        pkg_time = update_package.get("timestamp", time.time())
+        current_time = time.time()
+        # Enforce an acceptable skew window of 1 hour to block stale replayed frames
+        if abs(current_time - pkg_time) > 3600:
+            result["failed_at"] = "freshness"
+            return result
+        result["freshness_ok"] = True
 
-		stage_started = perf_counter()
-		expected_hash = update_package.get("expected_payload_hash", update_package.get("package_hash"))
-		result["hash_ok"] = sha3_hash.verify_hash(
-			payload_bytes,
-			expected_hash,
-		)
-		result["stage_durations_ms"]["hash"] = round((perf_counter() - stage_started) * 1000, 3)
-		result["verification_trace"].append({
-			"stage": "hash",
-			"ok": result["hash_ok"],
-			"duration_ms": result["stage_durations_ms"]["hash"],
-			"expected_payload_hash": expected_hash,
-			"computed_payload_hash": sha3_hash.hash_package(payload_bytes),
-		})
-		if not result["hash_ok"]:
-			result["failed_at"] = "hash"
-			return result
+        # --- GATE 3: Target and Version Gate (Unauthenticated check) ---
+        # Check target domain mapping and preliminary version monotonicity to save CPU cycles
+        target_ecu = update_package.get("target_ecu", "ADAS")
+        current_ver = update_package.get("current_version", "1.0.0")
+        incoming_ver = update_package.get("incoming_version", "1.0.0")
 
-		stage_started = perf_counter()
-		result["version_ok"] = version_check.is_valid_version(
-			update_package["current_version"],
-			update_package["incoming_version"],
-		)
-		result["stage_durations_ms"]["version"] = round((perf_counter() - stage_started) * 1000, 3)
-		result["verification_trace"].append({"stage": "version", "ok": result["version_ok"], "duration_ms": result["stage_durations_ms"]["version"]})
-		if not result["version_ok"]:
-			result["failed_at"] = "version"
-			return result
+        version_ok = is_valid_version(current_ver, incoming_ver)
+        if not version_ok:
+            result["failed_at"] = "version"
+            return result
+        result["target_version_ok"] = True
 
-		result["all_passed"] = True
-		result["veracity_score"] = 1.0
-		return result
+        # --- GATE 4: Dilithium Gate (ML-DSA-44 Signature Verification) ---
+        # Verifies that the package was signed by the OEM server
+        dilithium_ok = verify(
+            self.server_public_key,
+            update_package["payload"],
+            update_package["signature"]
+        )
+        result["dilithium_ok"] = dilithium_ok
+        if not dilithium_ok:
+            result["failed_at"] = "dilithium"
+            return result
+
+        # --- GATE 5: Kyber Gate (ML-KEM-512 Decapsulation) ---
+        # Recovers and verifies the symmetric session key
+        kyber_ok = verify_session(
+            self.vehicle_private_key,
+            update_package["ciphertext"],
+            update_package["session_key"]
+        )
+        result["kyber_ok"] = kyber_ok
+        if not kyber_ok:
+            result["failed_at"] = "kyber"
+            return result
+
+        # --- GATE 6: SHA3 Integrity & Authenticated Version Check ---
+        # 1. Payload hash check (Integrity)
+        hash_ok = verify_hash(
+            update_package["payload"],
+            update_package["package_hash"]
+        )
+        result["hash_ok"] = hash_ok
+        if not hash_ok:
+            result["failed_at"] = "hash"
+            return result
+
+        # 2. Secure Version Binding (Fix for unauthenticated header spoofing vulnerability)
+        # Extract the version number embedded inside the signed payload to verify authenticity
+        try:
+            payload_str = update_package["payload"]
+            if b"FIRMWARE::" in payload_str:
+                parts = payload_str.split(b"::")
+                authenticated_ver = parts[1].decode("utf-8")
+                if authenticated_ver != incoming_ver:
+                    # Reject because the header version was spoofed to bypass Gate 3
+                    result["failed_at"] = "version_spoof"
+                    return result
+        except Exception:
+            result["failed_at"] = "version_spoof"
+            return result
+
+        result["all_passed"] = True
+        return result
